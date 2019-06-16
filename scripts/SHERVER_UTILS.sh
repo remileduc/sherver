@@ -26,7 +26,7 @@ URL_BASE=''
 # See `parse_url()`.
 declare -Ag URL_PARAMETERS
 # The headers from the request
-declare -a REQUEST_HEADERS
+declare -A REQUEST_HEADERS
 DATE=$(date -uR)
 DATE=${DATE/%+0000/GMT}
 # The response headers (in an array)
@@ -34,11 +34,13 @@ declare -a RESPONSE_HEADERS=(
 	"Date: $DATE"
 	"Expires: $DATE"
 	'Server: Sherver'
-	'Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate'
+	'Cache-Control: private, max-age=60'
+	#'Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate'
 )
 # Generic HTTP response code with their meaning.
 declare -rA HTTP_RESPONSE=(
 	[200]='OK'
+	[304]='Not Modified'
 	[400]='Bad Request'
 	[403]='Forbidden'
 	[404]='Not Found'
@@ -124,13 +126,13 @@ function add_header()
 function _send_header()
 {
 	# HTTP header
-	echo "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
+	echo -en "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}\r\n"
 	shift
 	local i
 	for i in "${RESPONSE_HEADERS[@]}"; do
-		echo "$i"
+		echo -en "$i\r\n"
 	done
-	echo
+	echo -en '\r\n'
 }
 
 # Send the given answer in a HTTP 1.0 format.
@@ -246,16 +248,23 @@ function send_file()
 		send_error 404
 	fi
 
-	# HTTP header
-	local content_type=$(mimetype -b "$file")
-	local content_length=$(stat -c '%s' "$file")
-	add_header 'Content-Type'   "$content_type";
-	add_header 'Content-Length' "$content_length"
-	_send_header 200
-	# response
-	# note: we need to use external tool to stream binary files as bash can't handle non UTF-8 bytes.
-	# here we use python
-	python3 -c '
+	# we create an ETag
+	local etag="$(stat -c '%s-%y-%z' "$file")"
+	add_header 'ETag' "$etag"
+	# if client already cached it, we don't resend it
+	if [ -n "${REQUEST_HEADERS['If-None-Match']+1}" ] && [ "${REQUEST_HEADERS['If-None-Match']}" = "$etag" ]; then
+		send_response 304 ''
+	else
+		# HTTP header
+		local content_type=$(mimetype -b "$file")
+		local content_length=$(stat -c '%s' "$file")
+		add_header 'Content-Type'   "$content_type";
+		add_header 'Content-Length' "$content_length"
+		_send_header 200
+		# response
+		# note: we need to use external tool to stream binary files as bash can't handle non UTF-8 bytes.
+		# here we use python
+		python3 -c '
 import sys
 with open(sys.argv[1],"rb") as f1:
 	while True:
@@ -266,6 +275,7 @@ with open(sys.argv[1],"rb") as f1:
 			#sys.stdout.write(b)
 		else: break
 ' "$file"
+	fi
 }
 
 # Try to run the given file (script or executable), or fail with 404.
@@ -342,13 +352,16 @@ function read_request()
 	parse_url "$URL_REQUESTED"
 
 	# fill REQUEST_HEADERS
+	local key
+	local value
 	while read -r line; do
 		line=${line%%$'\r'}
 		# reached the end of the headers, break.
 		if [ -z "$line" ]; then
 			break
 		fi
-		REQUEST_HEADERS+=("$line")
+		IFS=': ' read -r key value <<< "$line"
+		REQUEST_HEADERS["$key"]="$value"
 		log "< $line"
 	done
 }

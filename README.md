@@ -44,7 +44,7 @@ This is made to run with `Bash`. It may not work in another shell. The following
 - `envsubst` if you want to do templating
 - `python` used to stream binary files. Python 2 or 3 can be used.
 	- default is Python 3, if you want to use Python 2, you'll have to change one line in the `send_file` function in [scripts/SHERVER_UTILS.sh](./scripts/SHERVER_UTILS.sh)
-- `socat` to run the server. Socat is installed by default on Debian.
+- `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
 
 ### Features ###
@@ -56,6 +56,7 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 - dynamic pages
 - templated HTML so you don't have to duplicate headers and footers
 - parse of URL query string
+- deal with client cache resources
 - easily extandable
 	- can run any scripts or executable of any languages as soon as they output something on `stdout`
 	- comes with a library of bash functions to ease the use
