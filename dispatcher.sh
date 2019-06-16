@@ -23,7 +23,7 @@ read_request
 
 # serve file
 if [[ $URL_BASE =~ ^/file/.* ]]; then
-	send_file "${URL_REQUESTED:1}"
+	send_file "${URL_BASE:1}"
 # run script
 # special case for root
 elif [ $URL_BASE = '/' ] || [[ $URL_BASE =~ ^/index\.(htm|html) ]]; then
