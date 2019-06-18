@@ -57,7 +57,7 @@ FOOTER_TEMPLATE=''
 
 export HEAD_TEMPLATE HEADER_TEMPLATE BODY_TEMPLATE FOOTER_TEMPLATE
 
-html=$(cat 'templates/template.html' | envsubst)
+html=$(envsubst < 'templates/template.html')
 
 add_header 'Content-Type' 'text/html; charset=utf-8'
 send_response 200 "$html"

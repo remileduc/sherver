@@ -18,7 +18,7 @@
 set -efu
 
 # The full request string
-REQUEST_FULL_STRING=''
+declare -g REQUEST_FULL_STRING=''
 
 function init_environment()
 {
@@ -26,19 +26,20 @@ function init_environment()
 	# this is needed because we can't export associative arrays...
 
 	# The method of the request (GET, POST...)
-	REQUEST_METHOD=''
+	declare -g REQUEST_METHOD=''
 	# The requested URL
-	REQUEST_URL=''
+	declare -g REQUEST_URL=''
 	# The headers from the request
 	declare -Ag REQUEST_HEADERS
 	# Body of the request (mainly useful for POST)
-	REQUEST_BODY=''
+	declare -g REQUEST_BODY=''
 	# The base URL, without the query string if any
-	URL_BASE=''
+	declare -g URL_BASE=''
 	# The parameters of the query string if any (in an associative array)
 	#
 	# See `parse_url()`.
 	declare -Ag URL_PARAMETERS
+	declare -g DATE
 	DATE=$(date -uR)
 	DATE=${DATE/%+0000/GMT}
 	# The response headers (in an array)
@@ -117,11 +118,10 @@ function parse_url()
 	IFS='?' read -r URL_BASE parameters <<< "${1:-$REQUEST_URL}"
 	# now split parameters
 	# first, split `key=value` in an array
-	declare -a fields
+	local -a fields
 	IFS='&' read -ra fields <<< "$parameters"
 	# now we fill URL_PARAMETERS
-	local key
-	local value
+	local key value
 	local -i i
 	for (( i=0; i < ${#fields[@]}; i++ )); do
 		IFS='=' read -r key value <<< "${fields[i]}"
@@ -193,7 +193,7 @@ export -f _send_header
 function send_response()
 {
 	# HTTP header
-	_send_header $1
+	_send_header "$1"
 	shift
 	# response
 	local i
@@ -220,7 +220,8 @@ export -f send_response
 #    HTTP/1.0 404 Not Found
 function send_error()
 {
-	local html=$(cat <<EOF
+	local html
+	html=$(cat <<EOF
 		<!DOCTYPE html>
 		<html>
 
@@ -282,15 +283,17 @@ function send_file()
 	fi
 
 	# we create an ETag
-	local etag="$(stat -c '%s-%y-%z' "$file")"
+	local etag
+	etag="$(stat -c '%s-%y-%z' "$file")"
 	add_header 'ETag' "$etag"
 	# if client already cached it, we don't resend it
 	if [ -n "${REQUEST_HEADERS['If-None-Match']+1}" ] && [ "${REQUEST_HEADERS['If-None-Match']}" = "$etag" ]; then
 		send_response 304 ''
 	else
 		# HTTP header
-		local content_type=$(mimetype -b "$file")
-		local content_length=$(stat -c '%s' "$file")
+		local content_type content_length
+		content_type=$(mimetype -b "$file")
+		content_length=$(stat -c '%s' "$file")
 		add_header 'Content-Type'   "$content_type";
 		add_header 'Content-Length' "$content_length"
 		_send_header 200
@@ -308,6 +311,7 @@ with open(sys.argv[1],"rb") as f1:
 			#sys.stdout.write(b)
 		else: break
 ' "$file"
+		log '================================================'
 	fi
 }
 export -f send_file
@@ -387,8 +391,7 @@ function read_request()
 	parse_url "$REQUEST_URL"
 
 	# fill REQUEST_HEADERS
-	local key
-	local value
+	local key value
 	while read -r line; do
 		line=${line%%$'\r'}
 		# reached the end of the headers, break.

@@ -20,9 +20,9 @@ set -efu
 cd "$(dirname "$0")"
 
 socat TCP4-LISTEN:"${1:-8080}",reuseaddr,fork EXEC:'./dispatcher.sh' &
-pid=$!
-echo $pid > '/tmp/sherver.pid'
-wait $pid
+pid="$!"
+echo "$pid" > '/tmp/sherver.pid'
+wait "$pid"
 
 #while nc -lp "${1:-8080}" -e './dispatcher.sh'; do
 #	echo '================================================'

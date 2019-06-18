@@ -26,7 +26,7 @@ if [[ $URL_BASE =~ ^/file/.* ]]; then
 	send_file "${URL_BASE:1}"
 # run script
 # special case for root
-elif [ $URL_BASE = '/' ] || [[ $URL_BASE =~ ^/index\.(htm|html) ]]; then
+elif [ "$URL_BASE" = '/' ] || [[ $URL_BASE =~ ^/index\.(htm|html) ]]; then
 	run_script '/index.sh'
 else
 	run_script "$REQUEST_URL"
