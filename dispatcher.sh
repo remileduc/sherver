@@ -32,5 +32,4 @@ else
 	run_script "$REQUEST_URL"
 fi
 
-log '================================================'
 exit 0

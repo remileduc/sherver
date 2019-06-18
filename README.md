@@ -56,13 +56,14 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 - dynamic pages
 - templated HTML so you don't have to duplicate headers and footers
 - parse of URL query string
+- support for GET and POST
 - deal with client cache resources
 - easily extandable
 	- can run any scripts or executable of any languages as soon as they output something on `stdout`
 	- comes with a library of bash functions to ease the use
 
 Even if it sounds awesome, Sherver still has the following limitations:
-- only support HTTP GET requests, though it should be possible to improve this point
+- only support HTTP GET and POST requests, though it would be easy to add the others
 - no concurrency
 	- if a page needs to download a lot of files, the files are sent one after the other
 	- if 2 users access the website, the second one needs to wait until the first one is fully served

@@ -22,23 +22,9 @@ REQUEST_FULL_STRING=''
 
 function init_environment()
 {
-	# if REQUEST_FULL_STRING is e;pty, we fill it with the input stream and we export it
-	if [ -z "$REQUEST_FULL_STRING" ]; then
-		local line
-		while read -r line; do
-			line="${line%%$'\r'}"
-			REQUEST_FULL_STRING="$REQUEST_FULL_STRING$line
-"
-			if [ -z "$line" ]; then
-				break
-			fi
-			log "< $line"
-		done
-	fi
-	export REQUEST_FULL_STRING
-
 	# we set all the needed variables in the environment.
 	# this is needed because we can't export associative arrays...
+
 	# The method of the request (GET, POST...)
 	REQUEST_METHOD=''
 	# The requested URL
@@ -74,8 +60,15 @@ function init_environment()
 		[500]='Internal Server Error'
 	)
 
-	# now we run read_request() to initialize all viariables
-	read_request <<< "$REQUEST_FULL_STRING"
+	# if REQUEST_FULL_STRING is empty, we fill it with the input stream and we export it
+	if [ -z "$REQUEST_FULL_STRING" ]; then
+		read_request
+		log "$REQUEST_FULL_STRING"
+		log
+		export REQUEST_FULL_STRING
+	else
+		read_request <<< "$REQUEST_FULL_STRING"
+	fi
 }
 export -f init_environment
 
@@ -161,10 +154,12 @@ function _send_header()
 {
 	# HTTP header
 	echo -en "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}\r\n"
+	log "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
 	shift
 	local i
 	for i in "${RESPONSE_HEADERS[@]}"; do
 		echo -en "$i\r\n"
+		log "> $i"
 	done
 	echo -en '\r\n'
 }
@@ -205,6 +200,7 @@ function send_response()
 	for i in "$@"; do
 		echo "$i"
 	done
+	log '================================================'
 }
 export -f send_response
 
@@ -241,8 +237,8 @@ function send_error()
 EOF
 )
 	add_header 'Content-Type' 'text/html; charset=utf-8'
-	send_response "$@" "$html"
 	log "ERROR $1"
+	send_response "$@" "$html"
 	exit 0
 }
 export -f send_error
@@ -376,14 +372,15 @@ function read_request()
 		send_error 400
 	fi
 	line=${line%%$'\r'}
+	REQUEST_FULL_STRING="$line"
 
 	# read URL
 	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
 	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] || [ -z "$REQUEST_HTTP_VERSION" ]; then
 		send_error 400
 	fi
-	# Only GET is supported at this time
-	if [ "$REQUEST_METHOD" != 'GET' ]; then
+	# Only GET and POST are supported at this time
+	if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'POST' ]; then
 		send_error 405
 	fi
 	# fill URL_*
@@ -398,8 +395,22 @@ function read_request()
 		if [ -z "$line" ]; then
 			break
 		fi
+		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
+$line"
 		IFS=': ' read -r key value <<< "$line"
 		REQUEST_HEADERS["$key"]="$value"
 	done
+
+	# fill REQUEST_BODY if POST
+	if [ "$REQUEST_METHOD" = 'POST' ] && [ -n "${REQUEST_HEADERS['Content-Length']+1}" ]; then
+		if ! read -rN "${REQUEST_HEADERS['Content-Length']}" line; then
+			send_error 400
+		fi
+		line=${line%%$'\r'}
+		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
+
+$line"
+		REQUEST_BODY="$line"
+	fi
 }
 export -f read_request
