@@ -2,10 +2,7 @@
 
 set -efu
 
-source 'SHERVER_UTILS.sh'
-
-URL="$1"
-parse_url "$URL"
+init_environment
 
 if [ -z "${URL_PARAMETERS[page]}" ]; then
 	send_error 404

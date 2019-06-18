@@ -19,7 +19,7 @@ set -efu
 
 source 'scripts/SHERVER_UTILS.sh'
 
-read_request
+init_environment
 
 # serve file
 if [[ $URL_BASE =~ ^/file/.* ]]; then
@@ -29,7 +29,7 @@ if [[ $URL_BASE =~ ^/file/.* ]]; then
 elif [ $URL_BASE = '/' ] || [[ $URL_BASE =~ ^/index\.(htm|html) ]]; then
 	run_script '/index.sh'
 else
-	run_script "$URL_REQUESTED"
+	run_script "$REQUEST_URL"
 fi
 
 log '================================================'

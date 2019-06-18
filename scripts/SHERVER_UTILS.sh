@@ -17,36 +17,67 @@
 
 set -efu
 
-# The requested URL
-URL_REQUESTED=''
-# The base URL, without the query string if any
-URL_BASE=''
-# The parameters of the query string if any (in an associative array)
-#
-# See `parse_url()`.
-declare -Ag URL_PARAMETERS
-# The headers from the request
-declare -A REQUEST_HEADERS
-DATE=$(date -uR)
-DATE=${DATE/%+0000/GMT}
-# The response headers (in an array)
-declare -a RESPONSE_HEADERS=(
-	"Date: $DATE"
-	"Expires: $DATE"
-	'Server: Sherver'
-	'Cache-Control: private, max-age=60'
-	#'Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate'
-)
-# Generic HTTP response code with their meaning.
-declare -rA HTTP_RESPONSE=(
-	[200]='OK'
-	[304]='Not Modified'
-	[400]='Bad Request'
-	[403]='Forbidden'
-	[404]='Not Found'
-	[405]='Method Not Allowed'
-	[500]='Internal Server Error'
-)
+# The full request string
+REQUEST_FULL_STRING=''
+
+function init_environment()
+{
+	# if REQUEST_FULL_STRING is e;pty, we fill it with the input stream and we export it
+	if [ -z "$REQUEST_FULL_STRING" ]; then
+		local line
+		while read -r line; do
+			line="${line%%$'\r'}"
+			REQUEST_FULL_STRING="$REQUEST_FULL_STRING$line
+"
+			if [ -z "$line" ]; then
+				break
+			fi
+			log "< $line"
+		done
+	fi
+	export REQUEST_FULL_STRING
+
+	# we set all the needed variables in the environment.
+	# this is needed because we can't export associative arrays...
+	# The method of the request (GET, POST...)
+	REQUEST_METHOD=''
+	# The requested URL
+	REQUEST_URL=''
+	# The headers from the request
+	declare -Ag REQUEST_HEADERS
+	# Body of the request (mainly useful for POST)
+	REQUEST_BODY=''
+	# The base URL, without the query string if any
+	URL_BASE=''
+	# The parameters of the query string if any (in an associative array)
+	#
+	# See `parse_url()`.
+	declare -Ag URL_PARAMETERS
+	DATE=$(date -uR)
+	DATE=${DATE/%+0000/GMT}
+	# The response headers (in an array)
+	declare -ag RESPONSE_HEADERS=(
+		"Date: $DATE"
+		"Expires: $DATE"
+		'Server: Sherver'
+		'Cache-Control: private, max-age=60'
+		#'Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate'
+	)
+	# Generic HTTP response code with their meaning.
+	declare -rAg HTTP_RESPONSE=(
+		[200]='OK'
+		[304]='Not Modified'
+		[400]='Bad Request'
+		[403]='Forbidden'
+		[404]='Not Found'
+		[405]='Method Not Allowed'
+		[500]='Internal Server Error'
+	)
+
+	# now we run read_request() to initialize all viariables
+	read_request <<< "$REQUEST_FULL_STRING"
+}
+export -f init_environment
 
 # Log any messages in the error outut of the script (default is console).
 #
@@ -63,16 +94,17 @@ function log()
 {
 	echo "$*" >&2
 }
+export -f log
 
 # Parse the given URL to exrtact the base URL and the query string.
 #
 # Takes an optional parameters: the URL to parse. By default, it will take the content of
-# the variable `URL_REQUESTED`.
+# the variable `REQUEST_URL`.
 #
 # It will store the base of the URL (without query string) in `URL_BASE`.
 # It will store all the parameters of the query string in the associative array `URL_PARAMETERS`.
 #
-# $1 - Optional: URL to parse (default will take content of `URL_REQUESTED`)
+# $1 - Optional: URL to parse (default will take content of `REQUEST_URL`)
 #
 # Examples
 #
@@ -89,7 +121,7 @@ function parse_url()
 {
 	# get base URL and parameters
 	local parameters
-	IFS='?' read -r URL_BASE parameters <<< "${1:-$URL_REQUESTED}"
+	IFS='?' read -r URL_BASE parameters <<< "${1:-$REQUEST_URL}"
 	# now split parameters
 	# first, split `key=value` in an array
 	declare -a fields
@@ -103,6 +135,7 @@ function parse_url()
 		URL_PARAMETERS["$key"]="$value"
 	done
 }
+export -f parse_url
 
 # Add header for the response.
 #
@@ -122,6 +155,7 @@ function add_header()
 {
    RESPONSE_HEADERS+=("$1: $2")
 }
+export -f add_header
 
 function _send_header()
 {
@@ -134,6 +168,7 @@ function _send_header()
 	done
 	echo -en '\r\n'
 }
+export -f _send_header
 
 # Send the given answer in a HTTP 1.0 format.
 #
@@ -171,6 +206,7 @@ function send_response()
 		echo "$i"
 	done
 }
+export -f send_response
 
 # Send the given error as an answer.
 #
@@ -209,6 +245,7 @@ EOF
 	log "ERROR $1"
 	exit 0
 }
+export -f send_error
 
 # Try to send the given file, or fail with 404.
 #
@@ -277,6 +314,7 @@ with open(sys.argv[1],"rb") as f1:
 ' "$file"
 	fi
 }
+export -f send_file
 
 # Try to run the given file (script or executable), or fail with 404.
 #
@@ -306,15 +344,16 @@ with open(sys.argv[1],"rb") as f1:
 function run_script()
 {
 	cd 'scripts'
-	parse_url "${1:-$URL_REQUESTED}"
+	parse_url "${1:-$REQUEST_URL}"
 	local -r script="${URL_BASE:1}"
 	# test if file exists, is a file, and is runnable
 	if [ ! -e "$script" ] || [ ! -f "$script" ] || [ ! -x "$script" ]; then
 		send_error 404
 	fi
 
-	"./$script" "${1:-$URL_REQUESTED}" || send_error 500
+	"./$script" "${1:-$REQUEST_URL}" || send_error 500
 }
+export -f run_script
 
 # Read the client request and set up environment.
 #
@@ -325,7 +364,7 @@ function run_script()
 # - `REQUEST_METHOD`
 # - `REQUEST_HTTP_VERSION`
 # - `REQUEST_HEADERS`
-# - `URL_REQUESTED`
+# - `REQUEST_URL`
 # - `URL_BASE`
 # - `URL_PARAMETERS`
 #
@@ -337,11 +376,10 @@ function read_request()
 		send_error 400
 	fi
 	line=${line%%$'\r'}
-	log "< $line"
 
 	# read URL
-	read -r REQUEST_METHOD URL_REQUESTED REQUEST_HTTP_VERSION <<<"$line"
-	if [ -z "$REQUEST_METHOD" ] || [ -z "$URL_REQUESTED" ] || [ -z "$REQUEST_HTTP_VERSION" ]; then
+	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
+	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] || [ -z "$REQUEST_HTTP_VERSION" ]; then
 		send_error 400
 	fi
 	# Only GET is supported at this time
@@ -349,7 +387,7 @@ function read_request()
 		send_error 405
 	fi
 	# fill URL_*
-	parse_url "$URL_REQUESTED"
+	parse_url "$REQUEST_URL"
 
 	# fill REQUEST_HEADERS
 	local key
@@ -362,6 +400,6 @@ function read_request()
 		fi
 		IFS=': ' read -r key value <<< "$line"
 		REQUEST_HEADERS["$key"]="$value"
-		log "< $line"
 	done
 }
+export -f read_request
