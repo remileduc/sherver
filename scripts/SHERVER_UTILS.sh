@@ -259,9 +259,6 @@ export -f send_error
 # by default in Debian. You can change it to use `file` command instead, but it doesn't
 # work as well...
 #
-# *Note* that we use a small inline Python script to stream the content of the file.
-# This is because, for binary files, bash can't stream non UTF-8 characters properly.
-#
 # $1 - the path to the file to send
 #
 # Examples
@@ -298,19 +295,7 @@ function send_file()
 		add_header 'Content-Length' "$content_length"
 		_send_header 200
 		# response
-		# note: we need to use external tool to stream binary files as bash can't handle non UTF-8 bytes.
-		# here we use python
-		python3 -c '
-import sys
-with open(sys.argv[1],"rb") as f1:
-	while True:
-		b=f1.read(1)
-		if b:
-			sys.stdout.buffer.write(b)
-			# for python2, replace with
-			#sys.stdout.write(b)
-		else: break
-' "$file"
+		cat "$file"
 		log '================================================'
 	fi
 }

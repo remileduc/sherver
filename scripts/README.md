@@ -174,8 +174,6 @@ The path generally comes from the URL (`URL_BASE`). You just need to remove the 
 
 *Note* that to find the correct mimetypem we use `mimetype` command which is shipped by default in Debian. You can change it to use `file` command instead, but it doesn't work as well...
 
-*Note* that we use a small inline Python script to stream the content of the file. This is because, for binary files, bash can't stream non UTF-8 characters properly.
-
 * $1 - the path to the file to send
 
 Examples

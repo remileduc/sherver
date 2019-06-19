@@ -42,8 +42,6 @@ This is made to run with `Bash`. It may not work in another shell. The following
 - `mimetype` command, used to get the mimetype of the files.
 	- you can change it by `file` if you prefer. just change the `send_file` function in [scripts/SHERVER_UTILS.sh](./scripts/SHERVER_UTILS.sh)
 - `envsubst` if you want to do templating
-- `python` used to stream binary files. Python 2 or 3 can be used.
-	- default is Python 3, if you want to use Python 2, you'll have to change one line in the `send_file` function in [scripts/SHERVER_UTILS.sh](./scripts/SHERVER_UTILS.sh)
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
 
