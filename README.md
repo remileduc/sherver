@@ -29,12 +29,31 @@ This is inspired by [bashttpd](https://github.com/avleen/bashttpd). Though, the 
 - [Requirements](#requirements)
 - [Features](#features)
 
+[How to use](#how-to-use)
+- [Serve static pages](#serve-static-pages)
+- [Serve files](#serve-files)
+- [Serve dynamic pages](#serve-dynamic-pages)
+- [Template mechanism](#template-mechanism)
+- [POST requests](#post-requests)
+
+[How to use (Expert)](#how-to-use-expert)
+- [Logs](#logs)
+- [Dispatcher](#dispatcher)
+- [Run as a service (daemon)](#run-as-a-service-daemon)
+
+[Example](#example)
+
+[About Security](#about-security)
+
+[Why Sherver?](#why-sherver)
+
+
 Presentation
 ------------
 
 ### How to run ###
 
-Just clone and run `./miniserver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./miniserver.sh 8081`.
+Just clone and run `./miniserver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./miniserver.sh 8080` (default is `8080`).
 
 ### Requirements ###
 
@@ -60,16 +79,173 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 	- can run any scripts or executable of any languages as soon as they output something on `stdout`
 	- comes with a library of bash functions to ease the use
 
+All of these makes Sherver the perfect tool to run a small server that will serve few pages on your local network.
+
 Even if it sounds awesome, Sherver still has the following limitations:
 - only support HTTP GET and POST requests, though it would be easy to add the others
 - no concurrency
 	- if a page needs to download a lot of files, the files are sent one after the other
 	- if 2 users access the website, the second one needs to wait until the first one is fully served
-- no security (see below)
+- no security (see [About Security](#about-security)).
 
-This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and concurrency.
+This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and concurrency (like *nginx* or other).
 
 **Always run Sherver behind a firewall that prevent any intrusions from outside**.
+
+How to use
+----------
+
+Quick documentation about how to use Sherver for your own use.
+
+### Serve static pages ###
+
+The simplest thing you can do is to serve static pages : pure HTML files that don't need any processing.
+
+To do so, you only need to put your HTML files in the subdirectory [file/pages](./file/pages). Then, you can access
+to your pages through a URL like `/file/pages/index.html` (if your
+file name is `index.html` for instance).
+
+Note that you'll have to give the full file name in the URL so Sherver can find it.
+
+It is as simple as that! If Sherver can find the file, it will serve it. Otherwise, it will return a 404 error.
+
+### Serve files ###
+
+You can serve any type of files from Sherver. From text-based like CSS or JavaScript to binaries like images, videos, zip...
+
+Just put the files in the subdirectory [file](./file). You can then reference them through a URL like
+`/file/venise.webp`. Note that it is preferable to give full path rather than relative paths.
+
+Sherver will automatically serve the file if it can find it, with the correct mime type. It will even allow the browser to
+cache the file, and will only serve it again if the file has changed. If Sherver can't find the file, it will return a
+404 error.
+
+For resources, like CSS, JavaScript, favicon... it is better to put them in the subfolder [file/resources](./file/resources),
+though you don't have to.
+
+**Example on how to link a CSS file:**
+
+```html
+<link rel="stylesheet" type="text/css" href="/file/resources/ugly.css">
+```
+
+**Example on how to integrate a picture in your HTML:**
+
+```html
+<img src="/file/venise.webp" alt="">
+```
+
+### Serve dynamic pages ###
+
+This is where Sherver becomes useful: it can serve dynamic pages, built server side depending on the context.
+
+To do so, you just need to add executables in the subfolder [scripts](./scripts). Executables can be of any types
+(bash script, python script, any other scripts, any binary like C++ compiled executable...) as soon as Sherver can
+execute it (it must have the `executable` flag set).
+
+As soon as you have an executable there, Sherver will run it and serve its output. Note that `index.sh` is a
+particular name as it is the one that will be executed by the dispatcher if you access to the root of the website
+(see [dispatcher](#dispatcher) section below). If Sherver can't run any files, it will return a 404 error. If
+the executable fails (return code is not `0`), it will return a 500 error.
+
+To link an executable, you have to omit the folder`scripts` in the URL: `/page.sh` will look for the executable
+`./scripts/page.sh`.
+
+The executable is ran from the `scripts` folder.
+
+**Bash scripts**
+
+Sherver is mainly made to work with bash scripts. If you create a Bash script, the first thing you should do is to
+run the function `init_environment`. Then you will have access to all the following variables:
+- `REQUEST_FULL_STRING`
+- `REQUEST_METHOD`
+- `REQUEST_URL`
+- `REQUEST_HEADERS`
+- `REQUEST_BODY`
+- `URL_BASE`
+- `URL_PARAMETERS`
+- `DATE`
+- `RESPONSE_HEADERS`
+- `HTTP_RESPONSE`
+
+And also a lot of useful functions like:
+- `add_header`
+- `send_response`
+- `send_file`
+- `send_error`
+
+Check the whole documentation about the `SHERVER_UTILS.sh` library in [scripts/README.md](./scripts/README.md).
+
+Everything written on the standard output will be sent to the client. Here is a very simple script that returns
+the requests in a text format:
+
+```bash
+#!/bin/bash
+
+init_environment
+if [ "$REQUEST_METHOD" != 'GET' ]; then
+	send_error 405
+fi
+
+add_header 'Content-Type' 'text/plain'
+send_response 200 "$REQUEST_FULL_STRING"
+```
+
+**Any other scripts or binaries**
+
+If you don't use Bash, you will only have access to the environment variable `REQUEST_FULL_STRING` that
+contains the full request as a string. The requested URL (`REQUEST_URL`) will be passed as first argument.
+
+Everything written on the standart output will be sent to the client. Though, you should write the
+headers of the response yourself.
+
+### Template mechanism ###
+
+For Bash scripts, there is a basic template engine integrated with Sherver (lol). It actually uses
+`envsubst` to replace any occurrence of `$VARIABLE` by the variable from the environment if there is.
+
+You can put your templates in the subfolder [scripts/templates](./scripts/templates), though it is not
+mandatory.
+
+Here is a template for a text file `template.txt` (that improves our previous Bash script example):
+
+```
+You entered the following request:
+
+$REQUEST
+```
+
+And you would use it with the following script:
+
+```bash
+#!/bin/bash
+
+init_environment
+if [ "$REQUEST_METHOD" != 'GET' ]; then
+	send_error 405
+fi
+
+REQUEST="$REQUEST_FULL_STRING"
+# put REQUEST in the environment so we can use it in our template
+export REQUEST
+# load the template
+response=$(envsubst < 'templates/template.txt')
+
+add_header 'Content-Type' 'text/plain'
+send_response 200 "$response"
+```
+
+Full HTML example in [Example](#example) below.
+
+
+- [POST requests](#post-requests)
+
+[How to use (Expert)](#how-to-use-expert)
+- [Logs](#logs)
+- [Dispatcher](#dispatcher)
+- [Run as a service (daemon)](#run-as-a-service-daemon)
+
+[Example](#example)
 
 About security
 --------------
