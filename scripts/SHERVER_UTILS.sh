@@ -201,6 +201,7 @@ function send_response()
 		echo "$i"
 	done
 	log '================================================'
+	exit 0
 }
 export -f send_response
 
@@ -240,7 +241,6 @@ EOF
 	add_header 'Content-Type' 'text/html; charset=utf-8'
 	log "ERROR $1"
 	send_response "$@" "$html"
-	exit 0
 }
 export -f send_error
 
@@ -298,6 +298,7 @@ function send_file()
 		cat "$file"
 		log '================================================'
 	fi
+	exit 0
 }
 export -f send_file
 
