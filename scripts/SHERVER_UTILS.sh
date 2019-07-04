@@ -17,40 +17,58 @@
 
 set -efu
 
-# The full request string
+# Public: The full request string
 declare -g REQUEST_FULL_STRING=''
 
+# Public: Initialize the environment.
+#
+# This function should always be ran at the top of any scripts. Once this function has
+# run, all the following variables will be available:
+#
+# * REQUEST_METHOD
+# * REQUEST_URL
+# * REQUEST_HEADERS
+# * REQUEST_BODY
+# * URL_BASE
+# * URL_PARAMETERS
+# * RESPONSE_HEADERS
+# * HTTP_RESPONSE
+# * REQUEST_FULL_STRING
+#
+# To do so, ti will read from the standard input the received request, and execute
+# `read_request` to initialize everything.
+#
+# Then, it will export the full request in the environment variable `REQUEST_FULL_STRING`
+# so it can always be reexecuted.
+#
+# This echanism also allows non bash script to have access to the request through the
+#environment.
 function init_environment()
 {
 	# we set all the needed variables in the environment.
 	# this is needed because we can't export associative arrays...
 
-	# The method of the request (GET, POST...)
+	# Public: The method of the request (GET, POST...)
 	declare -g REQUEST_METHOD=''
-	# The requested URL
+	# Public: The requested URL
 	declare -g REQUEST_URL=''
-	# The headers from the request
+	# Public: The headers from the request (associative array)
 	declare -Ag REQUEST_HEADERS
-	# Body of the request (mainly useful for POST)
+	# Public: Body of the request (mainly useful for POST)
 	declare -g REQUEST_BODY=''
-	# The base URL, without the query string if any
+	# Public: The base URL, without the query string if any
 	declare -g URL_BASE=''
-	# The parameters of the query string if any (in an associative array)
+	# Public: The parameters of the query string if any (in an associative array)
 	#
 	# See `parse_url()`.
 	declare -Ag URL_PARAMETERS
-	declare -g DATE
-	DATE=$(date -uR)
-	DATE=${DATE/%+0000/GMT}
-	# The response headers (in an array)
+	# Public: The response headers (associative array)
 	declare -Ag RESPONSE_HEADERS=(
-		[Date]="$DATE"
-		[Expires]="$DATE"
 		[Server]='Sherver'
 		[Cache-Control]='private, max-age=60'
 		#[Cache-Control]='private, max-age=0, no-cache, no-store, must-revalidate'
 	)
-	# Generic HTTP response code with their meaning.
+	# Public: Generic HTTP response code with their meaning (associative array)
 	declare -rAg HTTP_RESPONSE=(
 		[200]='OK'
 		[304]='Not Modified'
@@ -72,7 +90,7 @@ function init_environment()
 }
 export -f init_environment
 
-# Log any messages in the error outut of the script (default is console).
+# Public: Log any messages in the error outut of the script (default is console).
 #
 # Takes as many arguments as needed. they will all be written, separated by newlines.
 #
@@ -89,7 +107,7 @@ function log()
 }
 export -f log
 
-# Parse the given URL to exrtact the base URL and the query string.
+# Public: Parse the given URL to exrtact the base URL and the query string.
 #
 # Takes an optional parameters: the URL to parse. By default, it will take the content of
 # the variable `REQUEST_URL`.
@@ -129,7 +147,7 @@ function parse_url()
 }
 export -f parse_url
 
-# Add header for the response.
+# Public: Add header for the response.
 #
 # Takes 2 parameters: header name and header content.
 #
@@ -149,12 +167,39 @@ function add_header()
 }
 export -f add_header
 
+# Internal: Write the headers to the standard output.
+#
+# It will write all the headers defined in `RESPONSE_HEADERS`,
+# see `add_header()`.
+# It also automatically add the date header.
+#
+# Takes one parameter which is the code of the response.
+#
+# $1 - The code of the response, must exist in `HTTP_RESPONSE`
+#
+# Examples
+#
+#    _send_header 200
+#
+# will result in:
+#
+#    HTTP/1.0 200 OK
+#    Date: Thu, 04 Jul 2019 21:38:23 GMT
+#    Server: Sherver
+#    Cache-Control: private, max-age=60
+#    Expires: Thu, 04 Jul 2019 21:38:23 GMT
 function _send_header()
 {
 	# HTTP header
 	echo -en "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}\r\n"
 	log "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
-	shift
+	# Date
+	local datenow
+	datenow=$(date -uR)
+	datenow=${datenow/%+0000/GMT}
+	add_header 'Date' "$datenow"
+	add_header 'Expires' "$datenow"
+	# rest of the headers
 	local i
 	for i in "${!RESPONSE_HEADERS[@]}"; do
 		echo -en "$i: ${RESPONSE_HEADERS[$i]}\r\n"
@@ -164,10 +209,12 @@ function _send_header()
 }
 export -f _send_header
 
-# Send the given answer in a HTTP 1.0 format.
+# Public: Send the given answer in a HTTP 1.0 format.
 #
 # Takes the response code as first parameter, then as many parameters as needed to write the answer.
 # They will be sent, separated by newlines.
+#
+# At the end of the function, we call exit to terminate the process.
 #
 # Note that the headers need to have already been set with `add_header()`.
 #
@@ -204,7 +251,7 @@ function send_response()
 }
 export -f send_response
 
-# Send the given error as an answer.
+# Public: Send the given error as an answer.
 #
 # Takes one parameter: the error code. It will be sent as an answer, along with a very small
 # HTML explaining what is the error.
@@ -243,7 +290,7 @@ EOF
 }
 export -f send_error
 
-# Try to send the given file, or fail with 404.
+# Public: Try to send the given file, or fail with 404.
 #
 # Takes the path to the file to send as a parameter.
 #
@@ -301,7 +348,7 @@ function send_file()
 }
 export -f send_file
 
-# Try to run the given file (script or executable), or fail with 404.
+# Public: Try to run the given file (script or executable), or fail with 404.
 #
 # **Note:** this method is usded by the dispatcher and shouldn't be called manually.
 #
@@ -340,18 +387,18 @@ function run_script()
 }
 export -f run_script
 
-# Read the client request and set up environment.
+# Internal: Read the client request and set up environment.
 #
-# **Note:** this method is usded by the dispatcher and shouldn't be called manually.
+# **Note:** this method is used by the dispatcher and shouldn't be called manually.
 #
 # Reads the input stream and fills the following variables (also run `parse_url()`):
 #
-# - `REQUEST_METHOD`
-# - `REQUEST_HTTP_VERSION`
-# - `REQUEST_HEADERS`
-# - `REQUEST_URL`
-# - `URL_BASE`
-# - `URL_PARAMETERS`
+# * `REQUEST_METHOD`
+# * `REQUEST_HTTP_VERSION`
+# * `REQUEST_HEADERS`
+# * `REQUEST_URL`
+# * `URL_BASE`
+# * `URL_PARAMETERS`
 #
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 #

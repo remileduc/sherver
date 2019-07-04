@@ -1,61 +1,95 @@
-<!-- Documentation partly generated with tomdoc.sh: https://github.com/mlafeldt/tomdoc.sh -->
+Documentation partially generated with [tomdoc.sh](https://github.com/mlafeldt/tomdoc.sh).
 
 SHERVER_UTILS.sh
 ================
 
 Documentation of the library SHERVER_UTILS.sh.
 
+`REQUEST_FULL_STRING`
+---------------------
 
-`URL_REQUESTED`
----------------
+Public: The full request string
 
-The requested URL
 
+`REQUEST_METHOD`
+----------------
+
+Public: The method of the request (GET, POST...)
+
+`REQUEST_URL`
+-------------
+
+Public: The requested URL
+
+`REQUEST_HEADERS`
+-----------------
+
+Public: The headers from the request (associative array)
+
+`REQUEST_BODY`
+--------------
+
+Public: Body of the request (mainly useful for POST)
 
 `URL_BASE`
 ----------
 
-The base URL, without the query string if any
-
+Public: The base URL, without the query string if any
 
 `URL_PARAMETERS`
 ----------------
 
-The parameters of the query string if any (in an associative array)
+Public: The parameters of the query string if any (in an associative array)
 
 See `parse_url()`.
-
-
-`REQUEST_HEADERS`
-----------------
-
-The headers from the request
-
 
 `RESPONSE_HEADERS`
 ------------------
 
-The response headers (in an array)
-
+Public: The response headers (associative array)
 
 `HTTP_RESPONSE`
 ---------------
 
-Generic HTTP response code with their meaning.
+Public: Generic HTTP response code with their meaning (associative array)
 
+`init_environment()`
+--------------------
+
+Public: Initialize the environment.
+
+This function should always be ran at the top of any scripts. Once this function has
+run, all the following variables will be available:
+
+* REQUEST_METHOD
+* REQUEST_URL
+* REQUEST_HEADERS
+* REQUEST_BODY
+* URL_BASE
+* URL_PARAMETERS
+* RESPONSE_HEADERS
+* HTTP_RESPONSE
+* REQUEST_FULL_STRING
+
+To do so, ti will read from the standard input the received request, and execute
+`read_request` to initialize everything.
+
+Then, it will export the full request in the environment variable `REQUEST_FULL_STRING`
+so it can always be reexecuted.
+
+This echanism also allows non bash script to have access to the request through the
+environment.
 
 `log()`
 -------
 
-Log any messages in the error outut of the script (default is console).
+Public: Log any messages in the error outut of the script (default is console).
 
 Takes as many arguments as needed. they will all be written, separated by newlines.
 
 Examples
 
-```bash
      log "> HTTP/1.0 200 OK
-```
 
 will output
 
@@ -65,35 +99,31 @@ will output
 `parse_url()`
 -------------
 
-Parse the given URL to exrtact the base URL and the query string.
+Public: Parse the given URL to exrtact the base URL and the query string.
 
-Takes an optional parameters: the URL to parse. By default, it will take the content of the variable `URL_REQUESTED`.
+Takes an optional parameters: the URL to parse. By default, it will take the content of the variable `REQUEST_URL`.
 
 It will store the base of the URL (without query string) in `URL_BASE`. It will store all the parameters of the query string in the associative array `URL_PARAMETERS`.
 
-* $1 - Optional: URL to parse (default will take content of `URL_REQUESTED`)
+* $1 - Optional: URL to parse (default will take content of `REQUEST_URL`)
 
 Examples
 
-```bash
      parse_url '/index.sh?test=youpi&answer=42'
-```
 
 will result in
 
-```bash
      URL_BASE='/index.sh'
      URL_PARAMETERS=(
          ['test']='youpi'
          ['answer']='42'
      )
-```
 
 
 `add_header()`
 --------------
 
-Add header for the response.
+Public: Add header for the response.
 
 Takes 2 parameters: header name and header content.
 
@@ -102,21 +132,45 @@ Takes 2 parameters: header name and header content.
 
 Examples
 
-```bash
      add_header 'Content-Type' 'text/html; charset=utf-8'
-```
 
 will add the following line in the header of the response
 
      Content-Type: text/html; charset=utf-8
 
 
+`_send_header()`
+----------------
+
+Internal: Write the headers to the standard output.
+
+It will write all the headers defined in `RESPONSE_HEADERS`, see `add_header()`. It also automatically add the date header.
+
+Takes one parameter which is the code of the response.
+
+* $1 - The code of the response, must exist in `HTTP_RESPONSE`
+
+Examples
+
+     _send_header 200
+
+will result in:
+
+     HTTP/1.0 200 OK
+     Date: Thu, 04 Jul 2019 21:38:23 GMT
+     Server: Sherver
+     Cache-Control: private, max-age=60
+     Expires: Thu, 04 Jul 2019 21:38:23 GMT
+
+
 `send_response()`
 -----------------
 
-Send the given answer in a HTTP 1.0 format.
+Public: Send the given answer in a HTTP 1.0 format.
 
 Takes the response code as first parameter, then as many parameters as needed to write the answer. They will be sent, separated by newlines.
+
+At the end of the function, we call exit to terminate the process.
 
 Note that the headers need to have already been set with `add_header()`.
 
@@ -125,14 +179,13 @@ Note that the headers need to have already been set with `add_header()`.
 
 Examples
 
-```bash
      add_header 'Content-Type' 'text/plain'
      send_response 200 'this is some' 'cool text'
-```
 
 will send something like (depends on your default headers, see `RESPONSE_HEADERS`)
 
 ```
+
      HTTP/1.0 200 OK
      Content-Type: text/plain
 
@@ -144,7 +197,7 @@ will send something like (depends on your default headers, see `RESPONSE_HEADERS
 `send_error()`
 --------------
 
-Send the given error as an answer.
+Public: Send the given error as an answer.
 
 Takes one parameter: the error code. It will be sent as an answer, along with a very small HTML explaining what is the error.
 
@@ -152,9 +205,7 @@ Takes one parameter: the error code. It will be sent as an answer, along with a 
 
 Examples
 
-```bash
      send_errors 404
-```
 
 will create an answer that starts with
 
@@ -164,7 +215,7 @@ will create an answer that starts with
 `send_file()`
 -------------
 
-Try to send the given file, or fail with 404.
+Public: Try to send the given file, or fail with 404.
 
 Takes the path to the file to send as a parameter.
 
@@ -178,10 +229,8 @@ The path generally comes from the URL (`URL_BASE`). You just need to remove the 
 
 Examples
 
-```bash
      parse_url '/file/beautiful.png?dummy=stuff'
      send_file "${URL_BASE:1}"
-```
 
 if the file exist, will send a response that starts with (assuming file size is 4 kio)
 
@@ -193,7 +242,7 @@ if the file exist, will send a response that starts with (assuming file size is 
 `run_script()`
 --------------
 
-Try to run the given file (script or executable), or fail with 404.
+Public: Try to run the given file (script or executable), or fail with 404.
 
 **Note:** this method is usded by the dispatcher and shouldn't be called manually.
 
@@ -209,34 +258,32 @@ It is the script responsibility to send the response and everything...
 
 Examples
 
-```bash
      run_script '/index.sh?dummy=stuff'
-```
 
 will do the following
 
-```bash
      cd scripts
      './index.sh' '/index.sh?dummy=stuff'
-```
 
 
 `read_request()`
 ----------------
 
-Read the client request and set up environment.
+Internal: Read the client request and set up environment.
 
-**Note:** this method is usded by the dispatcher and shouldn't be called manually.
+**Note:** this method is used by the dispatcher and shouldn't be called manually.
 
 Reads the input stream and fills the following variables (also run `parse_url()`):
 
-- `REQUEST_METHOD`
-- `REQUEST_HTTP_VERSION`
-- `REQUEST_HEADERS`
-- `URL_REQUESTED`
-- `URL_BASE`
-- `URL_PARAMETERS`
+* `REQUEST_METHOD`
+* `REQUEST_HTTP_VERSION`
+* `REQUEST_HEADERS`
+* `REQUEST_URL`
+* `URL_BASE`
+* `URL_PARAMETERS`
 
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
+
+* $1 - if true, logs will be written (whole header, but not the body)
 
 

@@ -266,7 +266,21 @@ To keep the logs in a file, you can redirect the error output of *sherver.sh* in
 
 By default, the headers of both the requests and the responses are logged, but not the bodies.
 
-- [Dispatcher](#dispatcher)
+### Dispatcher ###
+
+The dispatcher is responsible of asking to either serve a file or run a script, depending on the requested UTL.
+It is implemented in the file [dispatcher.sh](./dispatcher.sh).
+
+It currently has 4 actions:
+
+- if the URL is the root (`/`), then it executes the script `scripts/index.sh`
+- if the URL asks for `index.htm` or `index.html`, it executes the script `scripts/index.sh`
+- if the URL starts with `/file/`, it serves the file asked
+- in any other case, it will run the script provided by the URL, prepending the *scripts* folder
+  (the URL `/test/dummy.sh` will run the script `scripts/test/dummy.sh` if it exists).
+
+All this behaviors can be changed by editing the file [dispatcher.sh](./dispatcher.sh).
+
 - [Run as a service (daemon)](#run-as-a-service-daemon)
 
 [Example](#example)
@@ -274,7 +288,27 @@ By default, the headers of both the requests and the responses are logged, but n
 About security
 --------------
 
+See [bashttpd](https://github.com/avleen/bashttpd#security). It is obvious to say that this comes without any security
+features. **Do not expose Sherver on Internet**.
+
+- it is not currently able to serve over HTTPS
+- it uses rudimentary bash scripts to parse URL and POST request body, that could lead to security breaches
+- it executes blindly any script in the *scripts* subfolder
+
+If you need to expose the site on internet, you need a real server that has been built especially to face all these
+issues.
+
+Though, it is perfect to use on a local network. It will be as secure as are your wifi connection and your firewall.
+
 Why Sherver?
 ------------
 
-More documentation later...
+I wanted to set up quickly a server that would serve dynamic pages, and that could execute some bash scripts, in order
+to control my media center through web pages.
+
+I didn't want to install and configure Apache or nGinx. In fact, I didn't want *any* configuration.
+
+Sherver is able to run without any configuration. You just need to add files at the right place. It can run without
+anything to be installed (all tools used are part of the default installation of Debian, except maybe for socat).
+
+You can see my use case in the `perso` branche.
