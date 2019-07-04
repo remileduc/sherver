@@ -53,7 +53,7 @@ Presentation
 
 ### How to run ###
 
-Just clone and run `./miniserver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./miniserver.sh 8080` (default is `8080`).
+Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` (default is `8080`).
 
 ### Requirements ###
 
@@ -95,7 +95,8 @@ This is why Sherver is supposed to remain in a private and controlled environmen
 How to use
 ----------
 
-Quick documentation about how to use Sherver for your own use.
+Quick documentation about how to use Sherver for your own use. All variables and functions mentioned here have a full
+description in [scripts/README.md](./scripts/README.md).
 
 ### Serve static pages ###
 
@@ -238,10 +239,33 @@ send_response 200 "$response"
 Full HTML example in [Example](#example) below.
 
 
-- [POST requests](#post-requests)
+### POST requests ###
 
-[How to use (Expert)](#how-to-use-expert)
-- [Logs](#logs)
+Post requests are supported. You can check the value of the variable `REQUEST_METHOD` that will either be
+`GET` or `POST`, so you can have different behavior based on the type of the request.
+
+The content of the POST request can be retreived in the variable `REQUEST_BODY`. If the data is url encoded
+by the client, you can use the function `parse_url` with some tricks to get an associative array of the parameters.
+
+Any content can be sent back to the client. You can add the correct mime type thanks to the method `add_header`.
+
+How to use (Expert)
+-------------------
+
+All variables and functions mentioned here have a full description in [scripts/README.md](./scripts/README.md).
+
+### Logs ###
+
+Anything written to the standard error can be logged. To ease the logs, you can use the function `log`.
+
+To keep the logs in a file, you can redirect the error output of *sherver.sh* in a file:
+
+```bash
+./sherver.sh 2> logs.txt
+```
+
+By default, the headers of both the requests and the responses are logged, but not the bodies.
+
 - [Dispatcher](#dispatcher)
 - [Run as a service (daemon)](#run-as-a-service-daemon)
 

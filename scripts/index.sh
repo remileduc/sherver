@@ -5,6 +5,7 @@ set -efu
 init_environment
 
 if [ "$REQUEST_METHOD" = 'POST' ]; then
+	add_header 'Content-Type' 'text/plain'
 	send_response 200 "You just sent me '$REQUEST_BODY'!
 	How kind of you <3"
 elif [ "$REQUEST_METHOD" != 'GET' ]; then

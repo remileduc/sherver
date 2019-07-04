@@ -43,12 +43,12 @@ function init_environment()
 	DATE=$(date -uR)
 	DATE=${DATE/%+0000/GMT}
 	# The response headers (in an array)
-	declare -ag RESPONSE_HEADERS=(
-		"Date: $DATE"
-		"Expires: $DATE"
-		'Server: Sherver'
-		'Cache-Control: private, max-age=60'
-		#'Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate'
+	declare -Ag RESPONSE_HEADERS=(
+		[Date]="$DATE"
+		[Expires]="$DATE"
+		[Server]='Sherver'
+		[Cache-Control]='private, max-age=60'
+		#[Cache-Control]='private, max-age=0, no-cache, no-store, must-revalidate'
 	)
 	# Generic HTTP response code with their meaning.
 	declare -rAg HTTP_RESPONSE=(
@@ -63,12 +63,11 @@ function init_environment()
 
 	# if REQUEST_FULL_STRING is empty, we fill it with the input stream and we export it
 	if [ -z "$REQUEST_FULL_STRING" ]; then
-		read_request
-		log "$REQUEST_FULL_STRING"
+		read_request true
 		log
 		export REQUEST_FULL_STRING
 	else
-		read_request <<< "$REQUEST_FULL_STRING"
+		read_request false <<< "$REQUEST_FULL_STRING"
 	fi
 }
 export -f init_environment
@@ -146,7 +145,7 @@ export -f parse_url
 #    Content-Type: text/html; charset=utf-8
 function add_header()
 {
-   RESPONSE_HEADERS+=("$1: $2")
+   RESPONSE_HEADERS["$1"]="$2"
 }
 export -f add_header
 
@@ -157,9 +156,9 @@ function _send_header()
 	log "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
 	shift
 	local i
-	for i in "${RESPONSE_HEADERS[@]}"; do
-		echo -en "$i\r\n"
-		log "> $i"
+	for i in "${!RESPONSE_HEADERS[@]}"; do
+		echo -en "$i: ${RESPONSE_HEADERS[$i]}\r\n"
+		log "> $i: ${RESPONSE_HEADERS[$i]}"
 	done
 	echo -en '\r\n'
 }
@@ -355,6 +354,8 @@ export -f run_script
 # - `URL_PARAMETERS`
 #
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
+#
+# $1 - if true, logs will be written (whole header, but not the body)
 function read_request()
 {
 	local line
@@ -367,10 +368,16 @@ function read_request()
 	# read URL
 	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
 	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] || [ -z "$REQUEST_HTTP_VERSION" ]; then
+		if [ "$1" = true ]; then
+			log "$REQUEST_FULL_STRING"
+		fi
 		send_error 400
 	fi
 	# Only GET and POST are supported at this time
 	if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'POST' ]; then
+		if [ "$1" = true ]; then
+			log "$REQUEST_FULL_STRING"
+		fi
 		send_error 405
 	fi
 	# fill URL_*
@@ -389,6 +396,9 @@ $line"
 		IFS=': ' read -r key value <<< "$line"
 		REQUEST_HEADERS["$key"]="$value"
 	done
+	if [ "$1" = true ]; then
+		log "$REQUEST_FULL_STRING"
+	fi
 
 	# fill REQUEST_BODY if POST
 	if [ "$REQUEST_METHOD" = 'POST' ] && [ -n "${REQUEST_HEADERS['Content-Length']+1}" ]; then
