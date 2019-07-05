@@ -25,15 +25,16 @@ declare -g REQUEST_FULL_STRING=''
 # This function should always be ran at the top of any scripts. Once this function has
 # run, all the following variables will be available:
 #
-# * REQUEST_METHOD
-# * REQUEST_URL
-# * REQUEST_HEADERS
-# * REQUEST_BODY
-# * URL_BASE
-# * URL_PARAMETERS
-# * RESPONSE_HEADERS
-# * HTTP_RESPONSE
-# * REQUEST_FULL_STRING
+# * `REQUEST_METHOD`
+# * `REQUEST_URL`
+# * `REQUEST_HEADERS`
+# * `REQUEST_BODY`
+# * `REQUEST_BODY_PARAMETERS`
+# * `URL_BASE`
+# * `URL_PARAMETERS`
+# * `RESPONSE_HEADERS`
+# * `HTTP_RESPONSE`
+# * `REQUEST_FULL_STRING`
 #
 # To do so, ti will read from the standard input the received request, and execute
 # `read_request` to initialize everything.
@@ -56,6 +57,9 @@ function init_environment()
 	declare -Ag REQUEST_HEADERS
 	# Public: Body of the request (mainly useful for POST)
 	declare -g REQUEST_BODY=''
+	# Public: parameters of the request, in case of POST with `application/x-www-form-urlencoded`
+	# content
+	declare -Ag REQUEST_BODY_PARAMETERS
 	# Public: The base URL, without the query string if any
 	declare -g URL_BASE=''
 	# Public: The parameters of the query string if any (in an associative array)
@@ -396,6 +400,8 @@ export -f run_script
 # * `REQUEST_METHOD`
 # * `REQUEST_HTTP_VERSION`
 # * `REQUEST_HEADERS`
+# * `REQUEST_BODY`
+# * `REQUEST_BODY_PARAMETERS`
 # * `REQUEST_URL`
 # * `URL_BASE`
 # * `URL_PARAMETERS`
@@ -457,6 +463,17 @@ $line"
 
 $line"
 		REQUEST_BODY="$line"
+		# if content is of type "application/x-www-form-urlencoded", we parse it
+		if [ -n "${REQUEST_HEADERS['Content-Type']+1}" ] && [ "${REQUEST_HEADERS['Content-Type']}" = 'application/x-www-form-urlencoded' ]; then
+			local -a fields
+			IFS='&' read -ra fields <<< "$REQUEST_BODY"
+			local key value
+			local -i i
+			for (( i=0; i < ${#fields[@]}; i++ )); do
+				IFS='=' read -r key value <<< "${fields[i]}"
+				REQUEST_BODY_PARAMETERS["$key"]="$value"
+			done
+		fi
 	fi
 }
 export -f read_request

@@ -31,6 +31,11 @@ Public: The headers from the request (associative array)
 
 Public: Body of the request (mainly useful for POST)
 
+`REQUEST_BODY_PARAMETERS`
+-------------------------
+
+Public: parameters of the request, in case of POST with `application/x-www-form-urlencoded` content
+
 `URL_BASE`
 ----------
 
@@ -61,15 +66,16 @@ Public: Initialize the environment.
 This function should always be ran at the top of any scripts. Once this function has
 run, all the following variables will be available:
 
-* REQUEST_METHOD
-* REQUEST_URL
-* REQUEST_HEADERS
-* REQUEST_BODY
-* URL_BASE
-* URL_PARAMETERS
-* RESPONSE_HEADERS
-* HTTP_RESPONSE
-* REQUEST_FULL_STRING
+* `REQUEST_METHOD`
+* `REQUEST_URL`
+* `REQUEST_HEADERS`
+* `REQUEST_BODY`
+* `REQUEST_BODY_PARAMETERS`
+* `URL_BASE`
+* `URL_PARAMETERS`
+* `RESPONSE_HEADERS`
+* `HTTP_RESPONSE`
+* `REQUEST_FULL_STRING`
 
 To do so, ti will read from the standard input the received request, and execute
 `read_request` to initialize everything.
@@ -278,6 +284,8 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 * `REQUEST_METHOD`
 * `REQUEST_HTTP_VERSION`
 * `REQUEST_HEADERS`
+* `REQUEST_BODY`
+* `REQUEST_BODY_PARAMETERS`
 * `REQUEST_URL`
 * `URL_BASE`
 * `URL_PARAMETERS`
