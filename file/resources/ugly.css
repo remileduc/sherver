@@ -12,10 +12,19 @@ body
 header, footer, section
 {
 	margin: 1.5em;
-	padding: 0.25em;
-	border-radius: 10px;
+	padding: 1.25em 5em;
 	background-color: rgba(255, 255, 255, 0.8);
 	box-shadow: 5px 5px 3px grey;
+}
+
+section.result.good
+{
+	background-color: rgba(0, 255, 0, 0.1);
+}
+
+section.result.bad
+{
+	background-color: rgba(255, 0, 0, 0.1);
 }
 
 h1, h2
@@ -31,10 +40,65 @@ h1
 
 pre
 {
-	margin-left: 5em;
-	margin-right: 5em;
 	padding: 1em;
-	text-align: left;
 	background-color: lightgrey;
+}
+
+ul
+{
+	padding-top: 1em;
+	padding-bottom: 1em;
+	border-color: black;
+	border-width: 1px;
+	border-style: solid;
+}
+
+pre, ul, form
+{
+	text-align: left;
+}
+
+nav ol
+{
+	list-style: none;
+}
+
+nav ol li
+{
+	display: inline;
+	margin: initial;
+}
+
+nav ol li:nth-child(n+2)::before
+{
+	content: "|";
+	padding-right: 1ch;
+}
+
+/* rounded borders */
+header, footer, section, pre, ul, fieldset
+{
 	border-radius: 10px;
+}
+
+.active, .inactive
+{
+	font-family: monospace;
+	font-weight: bold;
+}
+
+.active
+{
+	color: green;
+}
+
+.inactive
+{
+	color: red;
+}
+
+#reload
+{
+	float: right;
+	margin: 1em;
 }
