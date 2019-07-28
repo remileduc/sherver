@@ -69,6 +69,7 @@ function init_environment()
 	# Public: The response headers (associative array)
 	declare -Ag RESPONSE_HEADERS=(
 		[Server]='Sherver'
+		[Connection]='close'
 		[Cache-Control]='private, max-age=60'
 		#[Cache-Control]='private, max-age=0, no-cache, no-store, must-revalidate'
 	)
@@ -325,7 +326,7 @@ function send_file()
 {
 	local file="$1"
 	# test if file exists, is a file, and is readable
-	if [ ! -e "$file" ] || [ ! -f "$file" ] || [ ! -f "$file" ]; then
+	if [ ! -e "$file" ] || [ ! -f "$file" ] || [ ! -r "$file" ]; then
 		send_error 404
 	fi
 
@@ -334,7 +335,7 @@ function send_file()
 	etag="$(stat -c '%s-%y-%z' "$file")"
 	add_header 'ETag' "$etag"
 	# if client already cached it, we don't resend it
-	if [ -n "${REQUEST_HEADERS['If-None-Match']+1}" ] && [ "${REQUEST_HEADERS['If-None-Match']}" = "$etag" ]; then
+	if [ -v "REQUEST_HEADERS['If-None-Match']" ] && [ "${REQUEST_HEADERS['If-None-Match']}" = "$etag" ]; then
 		send_response 304 ''
 	else
 		# HTTP header
@@ -454,7 +455,7 @@ $line"
 	fi
 
 	# fill REQUEST_BODY if POST
-	if [ "$REQUEST_METHOD" = 'POST' ] && [ -n "${REQUEST_HEADERS['Content-Length']+1}" ]; then
+	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['Content-Length']" ]; then
 		if ! read -rN "${REQUEST_HEADERS['Content-Length']}" line; then
 			send_error 400
 		fi
@@ -464,7 +465,7 @@ $line"
 $line"
 		REQUEST_BODY="$line"
 		# if content is of type "application/x-www-form-urlencoded", we parse it
-		if [ -n "${REQUEST_HEADERS['Content-Type']+1}" ] && [ "${REQUEST_HEADERS['Content-Type']}" = 'application/x-www-form-urlencoded' ]; then
+		if [ -v "REQUEST_HEADERS['Content-Type']" ] && [ "${REQUEST_HEADERS['Content-Type']}" = 'application/x-www-form-urlencoded' ]; then
 			local -a fields
 			IFS='&' read -ra fields <<< "$REQUEST_BODY"
 			local key value
