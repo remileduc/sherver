@@ -97,6 +97,11 @@ header, footer, section, pre, ul, fieldset
 	color: red;
 }
 
+.softlogo
+{
+	vertical-align: middle;
+}
+
 #reload
 {
 	float: right;
