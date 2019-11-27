@@ -281,9 +281,54 @@ It currently has 4 actions:
 
 All this behaviors can be changed by editing the file [dispatcher.sh](./dispatcher.sh).
 
-- [Run as a service (daemon)](#run-as-a-service-daemon)
+### Run as a service (daemon) ###
 
-[Example](#example)
+First of all, you need to create a specific user that will run `sherver.sh` with low priviledges.
+We'll call our user `sherver` and we'll put the whole website in its hone directory.
+
+We need to add our user to the groups `sudo` and `netdev`, so it is able to manage the VPN
+(it is obviously not a good idea to give `sudo` to the user, this is why you shouldn't expose
+the website on Internet).
+
+```bash
+useradd -mUG sudo,netdev -s /usr/bin/bash sherver
+passwd sherver
+	...
+```
+
+Note that you can add your current user to the `sherver` group for practical reasons
+(you'll have to relog to make it effective):
+```bash
+adduser USER sherver
+```
+
+Now, let's get the website in its home directory
+
+```bash
+su sherver
+cd ~
+git clone https://github.com/remileduc/sherver.git
+cd sherver
+git checkout perso
+```
+
+Finally, we need to enable the service so it starts `sherver.sh` automatically. To do so,
+copy the file [sherver.service](./sherver.service) in `/usr/share/systemd/` and then
+enable the service:
+
+```bash
+cp sherver.service /usr/share/systemd/
+ln -s /usr/share/systemd/sherver.service /etc/systemd/system/sherver.service
+systemctl daemon-reload
+systemctl enable sherver.service
+```
+
+Example
+-------
+
+You can see as an example the scripts that I use at home to manage my VPN. It is accessible on the
+[perso](https://github.com/remileduc/sherver/tree/perso) branch. Note that you need the script
+[vpn-mgr.sh](https://github.com/remileduc/vpn-mgr) to be able to use it properly.
 
 About security
 --------------

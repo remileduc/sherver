@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # MIT License
 #
 # Sherver: Pure Bash lightweight web server.
@@ -15,19 +13,22 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 
-set -efu
+# systemd service unit file that starts sherver.sh
+[Unit]
+Description=Start sherver website
+After=multi-user.target
 
-cd "$(dirname "$0")"
+[Service]
+Type=simple
 
-# We use ipv4 only for VPN
-socat TCP4-LISTEN:"${1:-8080}",reuseaddr,fork EXEC:'./dispatcher.sh' 2>> '/tmp/sherver.log' &
-pid4="$!"
-echo "$pid4" > '/tmp/sherver.pid'
-chmod g+w '/tmp/sherver.pid'
-wait "$pid4"
+User=sherver
+Group=sherver
 
-# IPV6
-#socat TCP6-LISTEN:"${1:-8080}",reuseaddr,fork EXEC:'./dispatcher.sh' &
-#pid6="$!"
-#echo "$pid6" > '/tmp/sherver.pid'
-#wait "$pid6"
+WorkingDirectory=/home/sherver/sherver/
+ExecStart=/home/sherver/sherver/sherver.sh
+ExecStop=/usr/bin/bash -c "kill $(cat /tmp/sherver.pid) && rm -f /tmp/sherver.pid /tmp/sherver.log"
+
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
