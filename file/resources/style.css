@@ -1,0 +1,86 @@
+@font-face
+{
+	font-family: "Brankovic";
+	src: url("Brankovic.woff");
+}
+
+body
+{
+	background: black url("background.png") fixed no-repeat center top;
+	background-size: contain;
+	font-size: 1.75em;
+	font-family: "Brankovic", Arial, sans-serif;
+}
+
+form
+{
+	display: table;
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	margin-top: 20%;
+	margin-left: auto;
+	margin-right: auto;
+
+	background: rgba(0, 0, 0, 0.5);
+	text-align: center;
+}
+
+p
+{
+	margin: 0.1em;
+}
+
+input
+{
+	padding: 2px;
+	border: 1px solid #CCC;
+	outline: none;
+}
+
+input:hover
+{
+	box-shadow: 0 0 15px rgba(204, 204, 204, 0.5);
+}
+
+input:focus
+{
+	border-color: white;
+	box-shadow: 0 0 15px white;
+}
+
+input.incorrect
+{
+	border-color: rgba(255, 0, 0, 0.5);
+}
+
+input.incorrect:hover
+{
+	box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
+}
+
+input.incorrect:focus
+{
+	border-color: red;
+	box-shadow: 0 0 15px red;
+}
+
+#draggable
+{
+	position: relative;
+}
+
+.draggable
+{
+	cursor: grab;
+	text-align: center;
+	width: 4em;
+	border-radius: 3px;
+	background: black;
+	color: #CCC;
+	user-select: none;
+	-ms-user-select: none;
+	-webkit-user-select: none;
+}

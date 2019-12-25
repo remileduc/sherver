@@ -21,11 +21,11 @@ After=multi-user.target
 [Service]
 Type=simple
 
-User=sherver
-Group=sherver
+User=root
+Group=root
 
-WorkingDirectory=/home/sherver/sherver/
-ExecStart=/home/sherver/sherver/sherver.sh
+WorkingDirectory=/root/sherver/
+ExecStart=/root/sherver/sherver.sh 80
 ExecStop=/usr/bin/bash -c "kill $(cat /tmp/sherver.pid) && rm -f /tmp/sherver.pid /tmp/sherver.log"
 
 Restart=on-failure
