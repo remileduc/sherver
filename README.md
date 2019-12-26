@@ -59,7 +59,7 @@ Just clone and run `./sherver.sh`. Then, you should be able to connect to [local
 
 This is made to run with `Bash`. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
 - `mimetype` command, used to get the mimetype of the files.
-	- you can change it by `file` if you prefer. just change the `send_file` function in [scripts/SHERVER_UTILS.sh](./scripts/SHERVER_UTILS.sh)
+	- you can change it by `file --mime-type -b` if you prefer. just change the `send_file` function in [scripts/SHERVER_UTILS.sh](./scripts/SHERVER_UTILS.sh)
 - `envsubst` if you want to do templating
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests

@@ -196,8 +196,8 @@ export -f add_header
 function _send_header()
 {
 	# HTTP header
-	echo -en "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}\r\n"
 	log "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
+	echo -en "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}\r\n"
 	# Date
 	local datenow
 	datenow=$(date -uR)
@@ -207,8 +207,8 @@ function _send_header()
 	# rest of the headers
 	local i
 	for i in "${!RESPONSE_HEADERS[@]}"; do
-		echo -en "$i: ${RESPONSE_HEADERS[$i]}\r\n"
 		log "> $i: ${RESPONSE_HEADERS[$i]}"
+		echo -en "$i: ${RESPONSE_HEADERS[$i]}\r\n"
 	done
 	echo -en '\r\n'
 }
@@ -272,6 +272,7 @@ export -f send_response
 #    HTTP/1.0 404 Not Found
 function send_error()
 {
+	log "ERROR $1"
 	local html
 	html=$(cat <<EOF
 		<!DOCTYPE html>
@@ -290,7 +291,6 @@ function send_error()
 EOF
 )
 	add_header 'Content-Type' 'text/html; charset=utf-8'
-	log "ERROR $1"
 	send_response "$@" "$html"
 }
 export -f send_error
@@ -306,8 +306,8 @@ export -f send_error
 # The path generally comes from the URL (`URL_BASE`). You just need to remove the first
 # `/` to get a relative path.
 #
-# *Note* that to find the correct mimetypem we use `mimetype` command which is shipped
-# by default in Debian. You can change it to use `file` command instead, but it doesn't
+# *Note* that to find the correct mimetypem we use `mimetype -b` command which is shipped
+# by default in Debian. You can change it to use `file --mime-type -b` command instead, but it doesn't
 # work as well...
 #
 # $1 - the path to the file to send
