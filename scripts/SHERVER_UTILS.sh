@@ -306,9 +306,8 @@ export -f send_error
 # The path generally comes from the URL (`URL_BASE`). You just need to remove the first
 # `/` to get a relative path.
 #
-# *Note* that to find the correct mimetypem we use `mimetype -b` command which is shipped
-# by default in Debian. You can change it to use `file --mime-type -b` command instead, but it doesn't
-# work as well...
+# *Note* that to find the correct mimetype, we use `mimetype` script which is shipped
+# by default in Debian.
 #
 # $1 - the path to the file to send
 #
@@ -340,7 +339,7 @@ function send_file()
 	else
 		# HTTP header
 		local content_type content_length
-		content_type=$(mimetype -b "$file")
+		content_type=$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/utils/mimetype" -b "$file")
 		content_length=$(stat -c '%s' "$file")
 		add_header 'Content-Type'   "$content_type";
 		add_header 'Content-Length' "$content_length"
