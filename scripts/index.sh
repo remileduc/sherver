@@ -10,7 +10,11 @@ fi
 
 if [ "$REQUEST_METHOD" == 'POST' ]; then
 	add_header 'Content-Type' 'text/plain'
-	send_response 200 "$(./utils/status.sh)"
+	if [ -v "REQUEST_BODY_PARAMETERS['password']" ]; then
+		send_response 200 "your password is ${REQUEST_BODY_PARAMETERS['password']}"
+	else
+		send_response 200 "NOPE"
+	fi
 else # GET
 	HEAD_TEMPLATE=$(cat <<EOF
 		<title>Treasure Hunt</title>
