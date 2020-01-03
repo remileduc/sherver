@@ -24,8 +24,8 @@ Type=simple
 User=root
 Group=root
 
-WorkingDirectory=/root/sherver/
-ExecStart=/root/sherver/sherver.sh 80
+WorkingDirectory=/usr/local/bin/sherver/
+ExecStart=/usr/local/bin/sherver/sherver.sh 80
 ExecStop=/usr/bin/bash -c "kill $(cat /tmp/sherver.pid) && rm -f /tmp/sherver.pid /tmp/sherver.log"
 
 Restart=on-failure
