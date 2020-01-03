@@ -20,14 +20,14 @@ set -efu
 cd "$(dirname "$0")"
 
 # We use ipv4 only for VPN
-socat TCP4-LISTEN:"${1:-8080}",reuseaddr,fork EXEC:'./dispatcher.sh' 2>> '/tmp/sherver.log' &
+socat TCP4-LISTEN:"${1:-8080}",reuseaddr,fork,end-close EXEC:'./dispatcher.sh' 2>> '/tmp/sherver.log' &
 pid4="$!"
 echo "$pid4" > '/tmp/sherver.pid'
 chmod g+w '/tmp/sherver.pid'
 wait "$pid4"
 
 # IPV6
-#socat TCP6-LISTEN:"${1:-8080}",reuseaddr,fork EXEC:'./dispatcher.sh' &
+#socat TCP6-LISTEN:"${1:-8080}",reuseaddr,fork,end-close EXEC:'./dispatcher.sh' &
 #pid6="$!"
 #echo "$pid6" > '/tmp/sherver.pid'
 #wait "$pid6"
