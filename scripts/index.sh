@@ -21,7 +21,7 @@ function createForm()
 	middle=$(cat <<EOF
 		<form method="post">
 			<input type="text" name="username" id="username" placeholder="Your Name" value="$2" required="required" autocomplete="username" /><br />
-			<input type="password" name="password" id="password" class="$class" placeholder="password" required="required" autocomplete="off" autofocus />
+			<input type="password" name="password" id="password" class="$class" placeholder="password" required="required" autocomplete="new-password" autofocus />
 			<p class="$class">$text</p>
 			<button type="submit">Send...</button>
 		</form>
