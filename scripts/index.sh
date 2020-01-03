@@ -50,6 +50,7 @@ if [ "$REQUEST_METHOD" == 'POST' ]; then
 				|| [[ "$password" != *p*  ]]; then
 			createForm true "$username"
 		else
+			echo -e '\tSUCCESS' >> '/var/log/sherver.log'
 			middle=$(cat <<EOF
 			<p class="answer">CESAR looks under his colleagues desks.</p>
 			<!-- Cesar code +3 -->
@@ -64,7 +65,7 @@ fi
 HEAD_TEMPLATE=$(cat <<EOF
 	<title>Treasure Hunt</title>
 	<meta name="description" content="Treasure Hunt">
-	<script src="/file/resources/events.js"></script>
+	<script src="/file/resources/events.js" async></script>
 EOF
 )
 
