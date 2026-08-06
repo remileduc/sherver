@@ -98,6 +98,8 @@ How to use
 Quick documentation about how to use Sherver for your own use. All variables and functions mentioned here have a full
 description in [scripts/README.md](./scripts/README.md).
 
+Note that the 2 important folders `file` and `scripts` can be symlink, but files inside can't.
+
 ### Serve static pages ###
 
 The simplest thing you can do is to serve static pages : pure HTML files that don't need any processing.

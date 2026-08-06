@@ -11,6 +11,13 @@ Documentation of the library SHERVER_UTILS.sh.
 Public: The full request string
 
 
+`SHERVER_ROOT`
+--------------
+
+Public: Absolute path to the root of the website (canonical, no symlink)
+
+The dispatcher runs from the root, so we take the current directory. It is then inherited by the child scripts, which need it because `run_script` moves to `scripts/`.
+
 `REQUEST_METHOD`
 ----------------
 
@@ -63,8 +70,7 @@ Public: Generic HTTP response code with their meaning (associative array)
 
 Public: Initialize the environment.
 
-This function should always be ran at the top of any scripts. Once this function has
-run, all the following variables will be available:
+This function should always be ran at the top of any scripts. Once this function has run, all the following variables will be available:
 
 * `REQUEST_METHOD`
 * `REQUEST_URL`
@@ -77,14 +83,12 @@ run, all the following variables will be available:
 * `HTTP_RESPONSE`
 * `REQUEST_FULL_STRING`
 
-To do so, ti will read from the standard input the received request, and execute
-`read_request` to initialize everything.
+To do so, it will read from the standard input the received request, and execute `read_request` to initialize everything.
 
-Then, it will export the full request in the environment variable `REQUEST_FULL_STRING`
-so it can always be reexecuted.
+Then, it will export the full request in the environment variable `REQUEST_FULL_STRING` so it can always be reexecuted.
 
-This echanism also allows non bash script to have access to the request through the
-environment.
+This mechanism also allows non bash script to have access to the request through the environment.
+
 
 `log()`
 -------
@@ -218,6 +222,31 @@ will create an answer that starts with
      HTTP/1.0 404 Not Found
 
 
+`_resolve_path()`
+-----------------
+
+Internal: Resolve the given path and check that it stays in the authorized directory.
+
+**Note:** this method is used by `send_file()` and `run_script()` and shouldn't be called manually.
+
+Takes the authorized directory (relative to `SHERVER_ROOT`) and the path to resolve. The path is canonicalized, so neither `..` nor a symlink can be used to escape the directory.
+
+The result is stored in `RESOLVED_PATH` instead of being echoed, because this function exits on error: in a command substitution, the error page would be captured by the caller instead of being sent to the client.
+
+Sends a 404 if the path doesn't exist or if it lands outside the authorized directory. We purposely don't use 403 to avoid leak of the File System
+
+* $1 - authorized directory, relative to `SHERVER_ROOT` (`file` or `scripts`)
+* $2 - path to resolve, relative to the current directory
+
+Examples
+
+     _resolve_path 'file' '../file/pages/page.html'
+
+will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
+
+     RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
+
+
 `send_file()`
 -------------
 
@@ -225,7 +254,7 @@ Public: Try to send the given file, or fail with 404.
 
 Takes the path to the file to send as a parameter.
 
-It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, send a 404 error.
+It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, or if the file is outside of `file/`, send a 404 error.
 
 The path generally comes from the URL (`URL_BASE`). You just need to remove the first `/` to get a relative path.
 
@@ -254,7 +283,7 @@ Public: Try to run the given file (script or executable), or fail with 404.
 
 Takes the path to the file to run. The file can be a script in any language, or an executable. But it must have the `x` flag so we can run it.
 
-It will simply run the script if possible. If not, send a 404. If the script fails, send a 500.
+It will simply run the script if possible. If not, send a 404. If the script is outside of `scripts/`, send a 404. If the script fails, send a 500.
 
 It is the script responsibility to send the response and everything...
 
