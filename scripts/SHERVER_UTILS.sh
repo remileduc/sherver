@@ -60,6 +60,9 @@ function init_environment()
 	# Public: The requested URL
 	declare -g REQUEST_URL=''
 	# Public: The headers from the request (associative array)
+	#
+	# The keys are lowercase, because HTTP header names are case insensitive:
+	# use `REQUEST_HEADERS['content-type']`, not `REQUEST_HEADERS['Content-Type']`.
 	declare -Ag REQUEST_HEADERS
 	# Public: Body of the request (mainly useful for POST)
 	declare -g REQUEST_BODY=''
@@ -380,10 +383,10 @@ function send_file()
 
 	# we create an ETag
 	local etag
-	etag="$(stat -c '%s-%y-%z' "$file")"
+	etag="\"$(stat -c '%s-%Y' "$file")\""
 	add_header 'ETag' "$etag"
 	# if client already cached it, we don't resend it
-	if [ -v "REQUEST_HEADERS['If-None-Match']" ] && [ "${REQUEST_HEADERS['If-None-Match']}" = "$etag" ]; then
+	if [ -v "REQUEST_HEADERS['if-none-match']" ] && [ "${REQUEST_HEADERS['if-none-match']}" = "$etag" ]; then
 		send_response 304 ''
 	else
 		# HTTP header
@@ -497,15 +500,16 @@ function read_request()
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 $line"
 		IFS=': ' read -r key value <<< "$line"
-		REQUEST_HEADERS["$key"]="$value"
+		# header names are case insensitive, so we normalize them to lowercase
+		REQUEST_HEADERS["${key,,}"]="$value"
 	done
 	if [ "$1" = true ]; then
 		log "$REQUEST_FULL_STRING"
 	fi
 
 	# fill REQUEST_BODY if POST
-	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['Content-Length']" ]; then
-		if ! read -rN "${REQUEST_HEADERS['Content-Length']}" line; then
+	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['content-length']" ]; then
+		if ! read -rN "${REQUEST_HEADERS['content-length']}" line; then
 			send_error 400
 		fi
 		line=${line%%$'\r'}
@@ -513,8 +517,12 @@ $line"
 
 $line"
 		REQUEST_BODY="$line"
-		# if content is of type "application/x-www-form-urlencoded", we parse it
-		if [ -v "REQUEST_HEADERS['Content-Type']" ] && [ "${REQUEST_HEADERS['Content-Type']}" = 'application/x-www-form-urlencoded' ]; then
+		# if content is of type "application/x-www-form-urlencoded", we parse it.
+		# a media type is case insensitive and can carry parameters, like `;charset=UTF-8`
+		local media_type="${REQUEST_HEADERS['content-type']:-}"
+		media_type="${media_type%%;*}"
+		media_type="${media_type//[[:space:]]/}"
+		if [ "${media_type,,}" = 'application/x-www-form-urlencoded' ]; then
 			local -a fields
 			IFS='&' read -ra fields <<< "$REQUEST_BODY"
 			local key value

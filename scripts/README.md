@@ -33,6 +33,8 @@ Public: The requested URL
 
 Public: The headers from the request (associative array)
 
+The keys are lowercase, because HTTP header names are case insensitive: use `REQUEST_HEADERS['content-type']`, not `REQUEST_HEADERS['Content-Type']`.
+
 `REQUEST_BODY`
 --------------
 
