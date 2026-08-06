@@ -90,8 +90,15 @@ function init_environment()
 		[403]='Forbidden'
 		[404]='Not Found'
 		[405]='Method Not Allowed'
+		[413]='Content Too Large'
 		[500]='Internal Server Error'
 	)
+	# Public: Biggest request body we accept to read, in bytes
+	#
+	# The body ends up in `REQUEST_FULL_STRING`, which we export. Linux refuses to run a
+	# command when a single environment string is bigger than 128 kio, so past that limit
+	# every external command (`realpath`, `cat`...) fails and we can't answer at all.
+	declare -rg MAX_BODY_SIZE=$((64 * 1024))
 	# Internal: canonical path computed by `_resolve_path()`
 	declare -g RESOLVED_PATH=''
 
@@ -509,7 +516,19 @@ $line"
 
 	# fill REQUEST_BODY if POST
 	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['content-length']" ]; then
-		if ! read -rN "${REQUEST_HEADERS['content-length']}" line; then
+		local -r length="${REQUEST_HEADERS['content-length']}"
+		# a bogus length makes `read` fail with a bash error, and a huge one makes it wait
+		# for bytes that will never come, so we check it before using it
+		if [[ ! $length =~ ^[0-9]+$ ]]; then
+			log "BAD REQUEST: invalid Content-Length '$length'"
+			send_error 400
+		fi
+		# more than 10 digits overflows a bash integer, and is way over the limit anyway
+		if [ "${#length}" -gt 10 ] || [ "$length" -gt "$MAX_BODY_SIZE" ]; then
+			log "TOO LARGE: Content-Length '$length' over the $MAX_BODY_SIZE bytes limit"
+			send_error 413
+		fi
+		if ! read -rN "$length" line; then
 			send_error 400
 		fi
 		line=${line%%$'\r'}

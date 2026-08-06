@@ -67,6 +67,13 @@ Public: The response headers (associative array)
 
 Public: Generic HTTP response code with their meaning (associative array)
 
+`MAX_BODY_SIZE`
+---------------
+
+Public: Biggest request body we accept to read, in bytes
+
+The body ends up in `REQUEST_FULL_STRING`, which we export. Linux refuses to run a command when a single environment string is bigger than 128 kio, so past that limit every external command (`realpath`, `cat`...) fails and we can't answer at all.
+
 `init_environment()`
 --------------------
 
