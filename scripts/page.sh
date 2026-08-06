@@ -7,7 +7,8 @@ init_environment
 if [ "$REQUEST_METHOD" != 'GET' ]; then
 	send_error 405
 fi
-if [ -z "${URL_PARAMETERS[page]}" ]; then
+# `:-` because `set -u` makes a missing key fatal, which would end up as a 500
+if [ -z "${URL_PARAMETERS[page]:-}" ]; then
 	send_error 404
 fi
 
