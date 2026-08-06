@@ -237,6 +237,8 @@ export -f _send_header
 # Takes the response code as first parameter, then as many parameters as needed to write the answer.
 # They will be sent, separated by newlines.
 #
+# Call it with the code alone to send no body at all, as a 304 requires.
+#
 # At the end of the function, we call exit to terminate the process.
 #
 # Note that the headers need to have already been set with `add_header()`.
@@ -394,7 +396,7 @@ function send_file()
 	add_header 'ETag' "$etag"
 	# if client already cached it, we don't resend it
 	if [ -v "REQUEST_HEADERS['if-none-match']" ] && [ "${REQUEST_HEADERS['if-none-match']}" = "$etag" ]; then
-		send_response 304 ''
+		send_response 304
 	else
 		# HTTP header
 		local content_type content_length

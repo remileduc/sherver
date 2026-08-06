@@ -189,6 +189,8 @@ Public: Send the given answer in a HTTP 1.0 format.
 
 Takes the response code as first parameter, then as many parameters as needed to write the answer. They will be sent, separated by newlines.
 
+Call it with the code alone to send no body at all, as a 304 requires.
+
 At the end of the function, we call exit to terminate the process.
 
 Note that the headers need to have already been set with `add_header()`.
