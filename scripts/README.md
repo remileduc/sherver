@@ -328,6 +328,8 @@ Internal: Print the mime type of the given file.
 
 Uses the `mimetype` command installed on the system if there is one (Debian ships it in `libfile-mimeinfo-perl`), and falls back to the copy vendored in `scripts/utils/` otherwise. The vendored copy is resolved relatively to this library, because `run_script()` `cd`s into `scripts/`.
 
+`XDG_DATA_HOME` is pointed at a dead end so that only the system mime database is used: a desktop session can map `*.html` to `application/x-extension-html`, and what we serve must not depend on the associations of the account running the server.
+
 * $1 - the path to the file to inspect
 
 Examples

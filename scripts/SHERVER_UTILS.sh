@@ -458,6 +458,10 @@ export -f _resolve_path
 # otherwise. The vendored copy is resolved relatively to this library, because
 # `run_script()` `cd`s into `scripts/`.
 #
+# `XDG_DATA_HOME` is pointed at a dead end so that only the system mime database is used:
+# a desktop session can map `*.html` to `application/x-extension-html`, and what we serve
+# must not depend on the associations of the account running the server.
+#
 # $1 - the path to the file to inspect
 #
 # Examples
@@ -473,7 +477,7 @@ function _get_mimetype()
 	if ! mimetype=$(command -v 'mimetype'); then
 		mimetype="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/utils/mimetype"
 	fi
-	"$mimetype" -b "$1"
+	XDG_DATA_HOME='/dev/null' "$mimetype" -b "$1"
 }
 export -f _get_mimetype
 
