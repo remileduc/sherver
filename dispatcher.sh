@@ -17,6 +17,8 @@
 
 set -efu
 
+export LC_ALL=C.UTF-8
+
 source 'scripts/SHERVER_UTILS.sh'
 
 init_environment

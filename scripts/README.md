@@ -115,6 +115,44 @@ will output
      > HTTP/1.0 200 OK
 
 
+`_check_encoding()`
+-------------------
+
+Internal: Tell if the given string is properly percent encoded.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Returns 0 if the string can safely be given to `_url_decode()`, 1 otherwise. A `%` that is not followed by 2 hexadecimal digits can't be decoded, and `%00` decodes to a NUL byte, which silently truncates the string in bash.
+
+* $1 - the string to check
+
+Examples
+
+     _check_encoding '/file/my%20file.txt'  # returns 0
+     _check_encoding '/file/100%'           # returns 1
+
+
+`_url_decode()`
+---------------
+
+Internal: Decode the percent encoded characters of the given string.
+
+**Note:** the string must have been accepted by `_check_encoding()` first.
+
+The result is stored in the variable named by the first parameter, because a command substitution would drop a trailing newline coming from a `%0A`.
+
+* $1 - name of the variable to store the result in
+* $2 - the string to decode
+
+Examples
+
+     _url_decode value 'caf%C3%A9'
+
+will result in
+
+     value='café'
+
+
 `parse_url()`
 -------------
 
@@ -124,11 +162,15 @@ Takes an optional parameters: the URL to parse. By default, it will take the con
 
 It will store the base of the URL (without query string) in `URL_BASE`. It will store all the parameters of the query string in the associative array `URL_PARAMETERS`.
 
+Everything is percent decoded, but only once the URL has been split: a `%3F` in the path is a question mark in a file name, not the start of the query string. A URL that is not properly percent encoded can't be decoded, and is answered with a 400.
+
+A parameter without a name is skipped, as an empty key is not a valid array subscript.
+
 * $1 - Optional: URL to parse (default will take content of `REQUEST_URL`)
 
 Examples
 
-     parse_url '/index.sh?test=youpi&answer=42'
+     parse_url '/index.sh?test=youpi&answer=42&city=caf%C3%A9+ville'
 
 will result in
 
@@ -136,6 +178,7 @@ will result in
      URL_PARAMETERS=(
          ['test']='youpi'
          ['answer']='42'
+         ['city']='café ville'
      )
 
 

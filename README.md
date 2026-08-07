@@ -72,7 +72,7 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 - serve files (text or binary, pictures...) with correct mime type
 - dynamic pages
 - templated HTML so you don't have to duplicate headers and footers
-- parse of URL query string
+- parse of URL query string, percent decoded (so `/file/my%20file.txt` finds `my file.txt`)
 - support for GET and POST
 - deal with client cache resources
 - easily extandable

@@ -130,6 +130,57 @@ function log()
 }
 export -f log
 
+# Internal: Tell if the given string is properly percent encoded.
+#
+# **Note:** this method is used by `read_request()` and shouldn't be called manually.
+#
+# Returns 0 if the string can safely be given to `_url_decode()`, 1 otherwise. A `%` that
+# is not followed by 2 hexadecimal digits can't be decoded, and `%00` decodes to a NUL
+# byte, which silently truncates the string in bash.
+#
+# $1 - the string to check
+#
+# Examples
+#
+#    _check_encoding '/file/my%20file.txt'  # returns 0
+#    _check_encoding '/file/100%'           # returns 1
+function _check_encoding()
+{
+	if [[ $1 == *%00* ]]; then
+		return 1
+	fi
+	# a regex stays linear, where `${1//%[hex][hex]/}` copies the string once per match
+	local -r broken='%([^0-9a-fA-F]|[0-9a-fA-F][^0-9a-fA-F]|[0-9a-fA-F]?$)'
+	# no `%` outside of a valid triplet means the whole string is decodable
+	! [[ $1 =~ $broken ]]
+}
+export -f _check_encoding
+
+# Internal: Decode the percent encoded characters of the given string.
+#
+# **Note:** the string must have been accepted by `_check_encoding()` first.
+#
+# The result is stored in the variable named by the first parameter, because a command
+# substitution would drop a trailing newline coming from a `%0A`.
+#
+# $1 - name of the variable to store the result in
+# $2 - the string to decode
+#
+# Examples
+#
+#    _url_decode value 'caf%C3%A9'
+#
+# will result in
+#
+#    value='café'
+function _url_decode()
+{
+	# a backslash already in the string would be interpreted, so we double it first
+	local -r escaped="${2//\\/\\\\}"
+	printf -v "$1" '%b' "${escaped//%/\\x}"
+}
+export -f _url_decode
+
 # Public: Parse the given URL to exrtact the base URL and the query string.
 #
 # Takes an optional parameters: the URL to parse. By default, it will take the content of
@@ -138,11 +189,17 @@ export -f log
 # It will store the base of the URL (without query string) in `URL_BASE`.
 # It will store all the parameters of the query string in the associative array `URL_PARAMETERS`.
 #
+# Everything is percent decoded, but only once the URL has been split: a `%3F` in the path
+# is a question mark in a file name, not the start of the query string. A URL that is not
+# properly percent encoded can't be decoded, and is answered with a 400.
+#
+# A parameter without a name is skipped, as an empty key is not a valid array subscript.
+#
 # $1 - Optional: URL to parse (default will take content of `REQUEST_URL`)
 #
 # Examples
 #
-#    parse_url '/index.sh?test=youpi&answer=42'
+#    parse_url '/index.sh?test=youpi&answer=42&city=caf%C3%A9+ville'
 #
 # will result in
 #
@@ -150,12 +207,20 @@ export -f log
 #    URL_PARAMETERS=(
 #        ['test']='youpi'
 #        ['answer']='42'
+#        ['city']='café ville'
 #    )
 function parse_url()
 {
+	local -r url="${1:-$REQUEST_URL}"
+	# `read_request()` already checked the request URL, but this function is public
+	if ! _check_encoding "$url"; then
+		log "BAD REQUEST: invalid percent encoding in '$url'"
+		send_error 400
+	fi
 	# get base URL and parameters
 	local parameters
-	IFS='?' read -r URL_BASE parameters <<< "${1:-$REQUEST_URL}"
+	IFS='?' read -r URL_BASE parameters <<< "$url"
+	_url_decode URL_BASE "$URL_BASE"
 	# now split parameters
 	# first, split `key=value` in an array
 	local -a fields
@@ -165,6 +230,13 @@ function parse_url()
 	local -i i
 	for (( i=0; i < ${#fields[@]}; i++ )); do
 		IFS='=' read -r key value <<< "${fields[i]}"
+		# an empty key is a fatal `bad array subscript`, and carries no information anyway
+		if [ -z "$key" ]; then
+			continue
+		fi
+		# `+` is a space in a query string, but stays a `+` in the path above
+		_url_decode key "${key//+/ }"
+		_url_decode value "${value//+/ }"
 		URL_PARAMETERS["$key"]="$value"
 	done
 }
@@ -495,6 +567,14 @@ function read_request()
 		fi
 		send_error 405
 	fi
+	# `parse_url` decodes the URL, so a broken encoding can't be answered
+	if ! _check_encoding "$REQUEST_URL"; then
+		if [ "$1" = true ]; then
+			log "$REQUEST_FULL_STRING"
+		fi
+		log "BAD REQUEST: invalid percent encoding in '$REQUEST_URL'"
+		send_error 400
+	fi
 	# fill URL_*
 	parse_url "$REQUEST_URL"
 
@@ -508,7 +588,7 @@ function read_request()
 		fi
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 $line"
-		IFS=': ' read -r key value <<< "$line"
+		IFS=$': \t' read -r key value <<< "$line"
 		# header names are case insensitive, so we normalize them to lowercase
 		REQUEST_HEADERS["${key,,}"]="$value"
 	done
@@ -544,12 +624,23 @@ $line"
 		media_type="${media_type%%;*}"
 		media_type="${media_type//[[:space:]]/}"
 		if [ "${media_type,,}" = 'application/x-www-form-urlencoded' ]; then
+			if ! _check_encoding "$REQUEST_BODY"; then
+				log 'BAD REQUEST: invalid percent encoding in the body'
+				send_error 400
+			fi
 			local -a fields
 			IFS='&' read -ra fields <<< "$REQUEST_BODY"
 			local key value
 			local -i i
 			for (( i=0; i < ${#fields[@]}; i++ )); do
 				IFS='=' read -r key value <<< "${fields[i]}"
+				# an empty key is a fatal `bad array subscript`, and carries no information
+				if [ -z "$key" ]; then
+					continue
+				fi
+				# `+` is a space in urlencoded content
+				_url_decode key "${key//+/ }"
+				_url_decode value "${value//+/ }"
 				REQUEST_BODY_PARAMETERS["$key"]="$value"
 			done
 		fi
