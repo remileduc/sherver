@@ -83,12 +83,14 @@ All of these makes Sherver the perfect tool to run a small server that will serv
 
 Even if it sounds awesome, Sherver still has the following limitations:
 - only support HTTP GET and POST requests, though it would be easy to add the others
-- no concurrency
-	- if a page needs to download a lot of files, the files are sent one after the other
-	- if 2 users access the website, the second one needs to wait until the first one is fully served
+- concurrency is unbounded: `socat` forks one process per connection, so requests are served in
+  parallel, but nothing caps the number of children
+- no keep alive: this is HTTP 1.0 with `Connection: close`, so one request per connection
+- no shared state between requests: each one is a brand new process, so nothing is ever cached
+- POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
 - no security (see [About Security](#about-security)).
 
-This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and concurrency (like *nginx* or other).
+This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and scalability (like *nginx* or other).
 
 **Always run Sherver behind a firewall that prevent any intrusions from outside**.
 
@@ -246,8 +248,13 @@ Full HTML example in [Example](#example) below.
 Post requests are supported. You can check the value of the variable `REQUEST_METHOD` that will either be
 `GET` or `POST`, so you can have different behavior based on the type of the request.
 
-The content of the POST request can be retreived in the variable `REQUEST_BODY`. If the data is url encoded
-by the client, you can use the function `parse_url` with some tricks to get an associative array of the parameters.
+The content of the POST request can be retreived in the variable `REQUEST_BODY`. If the client sent
+`application/x-www-form-urlencoded` content, the parameters are also parsed for you in the associative
+array `REQUEST_BODY_PARAMETERS`.
+
+The body is limited to 64 kio (see `MAX_BODY_SIZE`), and a bigger one gets a `413` answer. The limit is
+not arbitrary: the body ends up in `REQUEST_FULL_STRING` which is exported, and Linux refuses to run a
+command when a single environment variable is bigger than 128 kio.
 
 Any content can be sent back to the client. You can add the correct mime type thanks to the method `add_header`.
 
