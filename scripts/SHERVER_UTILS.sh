@@ -316,7 +316,7 @@ export -f _send_header
 # Note that the headers need to have already been set with `add_header()`.
 #
 # $1 - HTTP response code. See `HTTP_RESPONSE`
-# $2... - The actual response to send
+# $2... - Optional: the actual response to send (a 304 must have none)
 #
 # Examples
 #
@@ -605,12 +605,15 @@ $line"
 			log "BAD REQUEST: invalid Content-Length '$length'"
 			send_error 400
 		fi
-		# more than 10 digits overflows a bash integer, and is way over the limit anyway
+		# outside `test`'s integer range, `-gt` errors out and counts as false, which would
+		# silently skip the limit. 10 digits is far above the limit anyway
 		if [ "${#length}" -gt 10 ] || [ "$length" -gt "$MAX_BODY_SIZE" ]; then
 			log "TOO LARGE: Content-Length '$length' over the $MAX_BODY_SIZE bytes limit"
 			send_error 413
 		fi
-		if ! read -rN "$length" line; then
+		# `Content-Length` counts bytes, but `-N` counts characters: in a UTF-8 locale a
+		# multibyte body would make us wait for characters the client never sends
+		if ! LC_ALL=C read -rN "$length" line; then
 			send_error 400
 		fi
 		line=${line%%$'\r'}

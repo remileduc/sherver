@@ -86,7 +86,7 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - concurrency is unbounded: `socat` forks one process per connection, so requests are served in
   parallel, but nothing caps the number of children
 - no keep alive: this is HTTP 1.0 with `Connection: close`, so one request per connection
-- no shared state between requests: each one is a brand new process, so nothing is ever cached
+- no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
 - no security (see [About Security](#about-security)).
 
@@ -248,7 +248,7 @@ Full HTML example in [Example](#example) below.
 Post requests are supported. You can check the value of the variable `REQUEST_METHOD` that will either be
 `GET` or `POST`, so you can have different behavior based on the type of the request.
 
-The content of the POST request can be retreived in the variable `REQUEST_BODY`. If the client sent
+The content of the POST request can be retrieved in the variable `REQUEST_BODY`. If the client sent
 `application/x-www-form-urlencoded` content, the parameters are also parsed for you in the associative
 array `REQUEST_BODY_PARAMETERS`.
 

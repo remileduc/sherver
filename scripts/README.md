@@ -239,7 +239,7 @@ At the end of the function, we call exit to terminate the process.
 Note that the headers need to have already been set with `add_header()`.
 
 * $1 - HTTP response code. See `HTTP_RESPONSE`
-* $2... - The actual response to send
+* $2... - Optional: the actual response to send (a 304 must have none)
 
 Examples
 
