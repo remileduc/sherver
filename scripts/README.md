@@ -21,7 +21,7 @@ The dispatcher runs from the root, so we take the current directory. It is then 
 `REQUEST_METHOD`
 ----------------
 
-Public: The method of the request (GET, POST...)
+Public: The method of the request (GET, HEAD, POST...)
 
 `REQUEST_URL`
 -------------
@@ -239,7 +239,7 @@ Public: Send the given answer in a HTTP 1.0 format.
 
 Takes the response code as first parameter, then as many parameters as needed to write the answer. They will be sent, separated by newlines.
 
-Call it with the code alone to send no body at all, as a 304 requires.
+Call it with the code alone to send no body at all, as a 304 requires. The body is also dropped on its own when the client sent a HEAD request.
 
 At the end of the function, we call exit to terminate the process.
 

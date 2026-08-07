@@ -55,7 +55,7 @@ function init_environment()
 	# inherited by the child scripts, which need it because `run_script` moves to `scripts/`.
 	declare -g SHERVER_ROOT="${SHERVER_ROOT:-$(realpath -e .)}"
 	export SHERVER_ROOT
-	# Public: The method of the request (GET, POST...)
+	# Public: The method of the request (GET, HEAD, POST...)
 	declare -g REQUEST_METHOD=''
 	# Public: The requested URL
 	declare -g REQUEST_URL=''
@@ -319,7 +319,8 @@ export -f _send_header
 # Takes the response code as first parameter, then as many parameters as needed to write the answer.
 # They will be sent, separated by newlines.
 #
-# Call it with the code alone to send no body at all, as a 304 requires.
+# Call it with the code alone to send no body at all, as a 304 requires. The body is also
+# dropped on its own when the client sent a HEAD request.
 #
 # At the end of the function, we call exit to terminate the process.
 #
@@ -349,10 +350,12 @@ function send_response()
 	_send_header "$1"
 	shift
 	# response
-	local i
-	for i in "$@"; do
-		echo "$i"
-	done
+	if [ "$REQUEST_METHOD" != 'HEAD' ]; then
+		local i
+		for i in "$@"; do
+			printf '%s\n' "$i"
+		done
+	fi
 	log '================================================'
 	exit 0
 }
@@ -489,7 +492,9 @@ function send_file()
 		add_header 'Content-Length' "$content_length"
 		_send_header 200
 		# response
-		cat "$file"
+		if [ "$REQUEST_METHOD" != 'HEAD' ]; then
+			cat "$file"
+		fi
 		log '================================================'
 	fi
 	exit 0
@@ -577,13 +582,16 @@ function read_request()
 		fi
 		send_error 400
 	fi
-	# Only GET and POST are supported at this time
-	if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'POST' ]; then
-		if [ "$1" = true ]; then
-			log "$REQUEST_FULL_STRING"
-		fi
-		send_error 405
-	fi
+	# Only GET, HEAD and POST are supported at this time
+	case "$REQUEST_METHOD" in
+		GET|HEAD|POST) ;;
+		*)
+			if [ "$1" = true ]; then
+				log "$REQUEST_FULL_STRING"
+			fi
+			send_error 405
+			;;
+	esac
 	# `parse_url` decodes the URL, so a broken encoding can't be answered
 	if ! _check_encoding "$REQUEST_URL"; then
 		if [ "$1" = true ]; then
