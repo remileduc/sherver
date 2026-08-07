@@ -163,16 +163,20 @@ The executable is ran from the `scripts` folder.
 
 Sherver is mainly made to work with bash scripts. If you create a Bash script, the first thing you should do is to
 run the function `init_environment`. Then you will have access to all the following variables:
-- `REQUEST_FULL_STRING`
+- `SHERVER_ROOT`
 - `REQUEST_METHOD`
 - `REQUEST_URL`
+- `REQUEST_HTTP_VERSION`
 - `REQUEST_HEADERS`
 - `REQUEST_BODY`
+- `REQUEST_BODY_PARAMETERS`
 - `URL_BASE`
 - `URL_PARAMETERS`
-- `DATE`
 - `RESPONSE_HEADERS`
 - `HTTP_RESPONSE`
+- `MAX_BODY_SIZE`
+- `MAX_HEADERS_SIZE`
+- `REQUEST_FULL_STRING`
 
 And also a lot of useful functions like:
 - `add_header`

@@ -28,6 +28,13 @@ Public: The method of the request (GET, HEAD, POST...)
 
 Public: The requested URL
 
+`REQUEST_HTTP_VERSION`
+----------------------
+
+Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
+
+Informative only: the answer is always in HTTP 1.0.
+
 `REQUEST_HEADERS`
 -----------------
 
@@ -88,8 +95,10 @@ Public: Initialize the environment.
 
 This function should always be ran at the top of any scripts. Once this function has run, all the following variables will be available:
 
+* `SHERVER_ROOT`
 * `REQUEST_METHOD`
 * `REQUEST_URL`
+* `REQUEST_HTTP_VERSION`
 * `REQUEST_HEADERS`
 * `REQUEST_BODY`
 * `REQUEST_BODY_PARAMETERS`
@@ -97,6 +106,8 @@ This function should always be ran at the top of any scripts. Once this function
 * `URL_PARAMETERS`
 * `RESPONSE_HEADERS`
 * `HTTP_RESPONSE`
+* `MAX_BODY_SIZE`
+* `MAX_HEADERS_SIZE`
 * `REQUEST_FULL_STRING`
 
 To do so, it will read from the standard input the received request, and execute `read_request` to initialize everything.

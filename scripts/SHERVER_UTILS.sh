@@ -25,8 +25,10 @@ declare -g REQUEST_FULL_STRING=''
 # This function should always be ran at the top of any scripts. Once this function has
 # run, all the following variables will be available:
 #
+# * `SHERVER_ROOT`
 # * `REQUEST_METHOD`
 # * `REQUEST_URL`
+# * `REQUEST_HTTP_VERSION`
 # * `REQUEST_HEADERS`
 # * `REQUEST_BODY`
 # * `REQUEST_BODY_PARAMETERS`
@@ -34,6 +36,8 @@ declare -g REQUEST_FULL_STRING=''
 # * `URL_PARAMETERS`
 # * `RESPONSE_HEADERS`
 # * `HTTP_RESPONSE`
+# * `MAX_BODY_SIZE`
+# * `MAX_HEADERS_SIZE`
 # * `REQUEST_FULL_STRING`
 #
 # To do so, it will read from the standard input the received request, and execute
@@ -59,6 +63,10 @@ function init_environment()
 	declare -g REQUEST_METHOD=''
 	# Public: The requested URL
 	declare -g REQUEST_URL=''
+	# Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
+	#
+	# Informative only: the answer is always in HTTP 1.0.
+	declare -g REQUEST_HTTP_VERSION=''
 	# Public: The headers from the request (associative array)
 	#
 	# The keys are lowercase, because HTTP header names are case insensitive:
