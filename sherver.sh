@@ -21,14 +21,16 @@ cd "$(dirname "$0")"
 
 # We use ipv4 only for VPN
 # -T: drop a connection that goes silent, so a client can't pin a forked child forever
-socat -T 10 TCP4-LISTEN:"${1:-8080}",reuseaddr,fork,end-close EXEC:'./dispatcher.sh' 2>> '/tmp/sherver.log' &
+# max-children: ~5 users times the 6 connections a browser opens. socat accepts past the cap and
+# waits for a free slot, so backlog is the room where those connections wait
+socat -T 10 TCP4-LISTEN:"${1:-8080}",reuseaddr,fork,max-children=32,backlog=32,end-close EXEC:'./dispatcher.sh' 2>> '/tmp/sherver.log' &
 pid4="$!"
 echo "$pid4" > '/tmp/sherver.pid'
 chmod g+w '/tmp/sherver.pid'
 wait "$pid4"
 
 # IPV6
-#socat -T 10 TCP6-LISTEN:"${1:-8080}",reuseaddr,fork,end-close EXEC:'./dispatcher.sh' &
+#socat -T 10 TCP6-LISTEN:"${1:-8080}",reuseaddr,fork,max-children=32,backlog=32,end-close EXEC:'./dispatcher.sh' &
 #pid6="$!"
 #echo "$pid6" > '/tmp/sherver.pid'
 #wait "$pid6"

@@ -83,8 +83,8 @@ All of these makes Sherver the perfect tool to run a small server that will serv
 
 Even if it sounds awesome, Sherver still has the following limitations:
 - only support HTTP GET and POST requests, though it would be easy to add the others
-- concurrency is unbounded: `socat` forks one process per connection, so requests are served in
-  parallel, but nothing caps the number of children
+- concurrency is capped at 32 connections: `socat` forks one process per connection and makes the
+  next ones wait for a free slot, so a burst queues instead of thrashing the machine
 - no keep alive: this is HTTP 1.0 with `Connection: close`, so one request per connection
 - no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
