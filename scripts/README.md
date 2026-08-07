@@ -74,6 +74,13 @@ Public: Biggest request body we accept to read, in bytes
 
 The body ends up in `REQUEST_FULL_STRING`, which we export. Linux refuses to run a command when a single environment string is bigger than 128 kio, so past that limit every external command (`realpath`, `cat`...) fails and we can't answer at all.
 
+`MAX_HEADERS_SIZE`
+------------------
+
+Public: Biggest request line + headers we accept to read, in characters
+
+They land in `REQUEST_FULL_STRING` too, so they share the 128 kio limit of `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if every header character takes 4 bytes.
+
 `init_environment()`
 --------------------
 

@@ -88,6 +88,7 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - no keep alive: this is HTTP 1.0 with `Connection: close`, so one request per connection
 - no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
+- the request line and headers are limited to 8 kio, bigger ones get a `414` or a `431` answer
 - no security (see [About Security](#about-security)).
 
 This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and scalability (like *nginx* or other).

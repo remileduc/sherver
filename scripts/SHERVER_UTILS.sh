@@ -91,6 +91,8 @@ function init_environment()
 		[404]='Not Found'
 		[405]='Method Not Allowed'
 		[413]='Content Too Large'
+		[414]='URI Too Long'
+		[431]='Request Header Fields Too Large'
 		[500]='Internal Server Error'
 	)
 	# Public: Biggest request body we accept to read, in bytes
@@ -99,6 +101,12 @@ function init_environment()
 	# command when a single environment string is bigger than 128 kio, so past that limit
 	# every external command (`realpath`, `cat`...) fails and we can't answer at all.
 	declare -rg MAX_BODY_SIZE=$((64 * 1024))
+	# Public: Biggest request line + headers we accept to read, in characters
+	#
+	# They land in `REQUEST_FULL_STRING` too, so they share the 128 kio limit of
+	# `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if
+	# every header character takes 4 bytes.
+	declare -rg MAX_HEADERS_SIZE=$((8 * 1024))
 	# Internal: canonical path computed by `_resolve_path()`
 	declare -g RESOLVED_PATH=''
 
@@ -549,6 +557,12 @@ function read_request()
 	if ! read -r line; then
 		send_error 400
 	fi
+	# checked before we touch the string: `send_error` runs `cat`, which fails just the same
+	# once the environment is too big, and the suffix strip below is quadratic in bash
+	if [ "${#line}" -gt "$MAX_HEADERS_SIZE" ]; then
+		log "TOO LARGE: request line over the $MAX_HEADERS_SIZE characters limit"
+		send_error 414
+	fi
 	line=${line%%$'\r'}
 	REQUEST_FULL_STRING="$line"
 
@@ -581,6 +595,11 @@ function read_request()
 	# fill REQUEST_HEADERS
 	local key value
 	while read -r line; do
+		# checked first, for the same reasons as the request line above
+		if [ $(( ${#REQUEST_FULL_STRING} + ${#line} + 1 )) -gt "$MAX_HEADERS_SIZE" ]; then
+			log "TOO LARGE: headers over the $MAX_HEADERS_SIZE characters limit"
+			send_error 431
+		fi
 		line=${line%%$'\r'}
 		# reached the end of the headers, break.
 		if [ -z "$line" ]; then
@@ -616,7 +635,6 @@ $line"
 		if ! LC_ALL=C read -rN "$length" line; then
 			send_error 400
 		fi
-		line=${line%%$'\r'}
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 
 $line"
