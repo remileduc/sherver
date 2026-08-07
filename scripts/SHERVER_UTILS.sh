@@ -134,7 +134,7 @@ export -f init_environment
 #    > HTTP/1.0 200 OK
 function log()
 {
-	echo "$*" >&2
+	printf '%s\n' "$*" >&2
 }
 export -f log
 
@@ -295,7 +295,9 @@ function _send_header()
 {
 	# HTTP header
 	log "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
-	echo -en "HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}\r\n"
+	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a
+	# real CRLF and inject a header of its own
+	printf 'HTTP/1.0 %s %s\r\n' "$1" "${HTTP_RESPONSE[$1]}"
 	# Date
 	local datenow
 	datenow=$(date -uR)
@@ -306,9 +308,9 @@ function _send_header()
 	local i
 	for i in "${!RESPONSE_HEADERS[@]}"; do
 		log "> $i: ${RESPONSE_HEADERS[$i]}"
-		echo -en "$i: ${RESPONSE_HEADERS[$i]}\r\n"
+		printf '%s: %s\r\n' "$i" "${RESPONSE_HEADERS[$i]}"
 	done
-	echo -en '\r\n'
+	printf '\r\n'
 }
 export -f _send_header
 
@@ -422,7 +424,8 @@ export -f send_error
 #    RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
 function _resolve_path()
 {
-	local -r authorized=$(realpath -e -- "$SHERVER_ROOT/$1")
+	local authorized
+	authorized=$(realpath -e -- "$SHERVER_ROOT/$1") || send_error 500
 	# `-e` requires every component to exist, so a missing file is a 404
 	if ! RESOLVED_PATH=$(realpath -e -- "$2" 2>/dev/null); then
 		log "NOT FOUND: realpath - '$2'"
