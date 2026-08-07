@@ -1,82 +1,95 @@
 #!/usr/bin/perl
 
 use strict;
-our $VERSION = '0.29';
+use warnings;
+our $VERSION = '0.37';
 $|++;
 
 # ########## #
 # Parse ARGV #
 # ########## #
+use Encode::Locale;
+use Encode;
+use B qw(cstring);
+@ARGV = map { my $d = eval { decode(locale => $_, 1) }; defined $d ? $d : $_ } @ARGV;
+
+# Set up output encoding
+if (-t) {
+    binmode(STDIN, ":encoding(console_in)");
+    binmode(STDOUT, ":encoding(console_out)");
+    binmode(STDERR, ":encoding(console_out)");
+}
+
 my %args = ();
 my %opts = (
-	# name	=> [char, expect_arg_bit ]
-	'help'		=> ['h'],
-	'usage'		=> ['u'],
-	'version'	=> ['v'],
-	'stdin'		=> [''],
-	'brief'		=> ['b'],
-	'namefile'	=> ['f', 1],
-	'noalign'	=> ['N'],
-	'describe'	=> ['d'],
-	'file-compat'	=> [''],
-	'output-format'	=> ['', 1],
-	'language'	=> ['l', 1],
-	'mimetype'	=> ['i'],
-	'dereference'	=> ['L'],
-	'separator'	=> ['F',1],
-	'debug'		=> ['D'],
-	'database'	=> ['', 1],
-	'all'		=> ['a'],
-	'magic-only'	=> ['M'],
+    'help'          => ['h'],
+    'usage'         => ['u'],
+    'version'       => ['v'],
+    'stdin'         => [''],
+    'brief'         => ['b'],
+    'namefile'      => ['f', 1],
+    'noalign'       => ['N'],
+    'describe'      => ['d'],
+    'file-compat'   => [''],
+    'output-format' => ['', 1],
+    'language'      => ['l', 1],
+    'mimetype'      => ['i'],
+    'dereference'   => ['L'],
+    'separator'     => ['F',1],
+    'debug'         => ['D'],
+    'database'      => ['', 1],
+    'all'           => ['a'],
+    'magic-only'    => ['M'],
 );
 
 $args{'file-compat'}++ if $0 =~ m#(^|/)file$#;
 
 while ((@ARGV) && ($ARGV[0] =~ /^-/)) {
-	my $opt = shift @ARGV;
-	if ($opt =~ /^--?$/) {
-		$args{stdin}++ if $args{'file-compat'} && $opt eq '-';
-		last;
-	}
-	elsif ($opt =~ s/^--([\w-]+)(?:=(.*))?/$1/) {
-		if (exists $opts{$opt}) {
-			if ($opts{$opt}[1]) {
-				my $arg = $2 || shift @ARGV;
-				complain('--'.$opt, 2) unless defined $arg;
-				$args{$opt} .= ( $args{$opt} ? ' ' : '' ) . $arg;
-			}
-			else { $args{$opt}++ }
-		}
-		else { complain('--'.$opt) }
-	}
-	elsif ($opt =~ s/^-(?!-)//) {
-		foreach my $o (split //, $opt) {
-			my ($key) = grep { $opts{$_}[0] eq $o } keys %opts;
-			complain($o) unless $key;
+    my $opt = shift @ARGV;
+    if ($opt =~ /^--?$/) {
+        $args{stdin}++ if $args{'file-compat'} && $opt eq '-';
+        last;
+    }
+    elsif ($opt =~ s/^--([\w-]+)(?:=(.*))?/$1/) {
+        if (exists $opts{$opt}) {
+            if ($opts{$opt}[1]) {
+                my $arg = $2 || shift @ARGV;
+                complain('--'.$opt, 2) unless defined $arg;
+                $args{$opt} .= ( $args{$opt} ? ' ' : '' ) . $arg;
+            }
+            else { $args{$opt}++ }
+        }
+        else { complain('--'.$opt) }
+    }
+    elsif ($opt =~ s/^-(?!-)//) {
+        foreach my $o (split //, $opt) {
+            my ($key) = grep { $opts{$_}[0] eq $o } keys %opts;
+            complain($o) unless $key;
 
-			if ($opts{$key}[1]) {
-				my $arg = shift @ARGV;
-				complain('-'.$o, 2) unless defined $arg;
-				$args{$key} .= ( $args{$key} ? ' ' : '' ).$arg; # join with whitespace
-			}
-			else { $args{$key}++; }
-		}
-	}
-	else { complain($opt) }
+            if ($opts{$key}[1]) {
+                my $arg = shift @ARGV;
+                complain('-'.$o, 2) unless defined $arg;
+                $args{$key} .= ( $args{$key} ? ' ' : '' ).$arg; # join with whitespace
+            }
+            else { $args{$key}++; }
+        }
+    }
+    else { complain($opt) }
 }
 
 if ($args{help} || $args{usage}) {
-	eval 'use Pod::Usage';
-	die "Could not find perl module Pod::Usage\n" if $@;
-	pod2usage( {
-		-verbose => 1,
-		-exitval => 0,
-	} );
+    eval 'use Pod::Usage';
+    die "Could not find perl module Pod::Usage\n" if $@;
+    pod2usage( {
+        -verbose => 1,
+        -exitval => 0,
+    } );
 }
 
 if ($args{version}) {
-	print "mimetype $VERSION\n\n", << 'EOV';
+    print "mimetype $VERSION\n\n", << 'EOV';
 Copyright (c) 2003, 2012 Jaap G Karssenberg. All rights reserved.
+Copyright (c) 2013-2026 Michiel W. Beijen. All rights reserved.
 This program is free software; you can redistribute it and/or
 modify it under the same terms as Perl.
 
@@ -84,7 +97,7 @@ This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 EOV
-	exit 0;
+    exit 0;
 }
 
 complain(undef, 4) unless scalar(@ARGV) || $args{stdin} || $args{namefile};
@@ -96,7 +109,10 @@ complain(undef, 4) unless scalar(@ARGV) || $args{stdin} || $args{namefile};
 our %desc; # desc caching hash
 
 # --database
-@File::MimeInfo::DIRS = split /:/, $args{database} if $args{database};
+{
+    no warnings 'once';
+    @File::MimeInfo::DIRS = split /:/, $args{database} if $args{database};
+}
 
 ## Actually use our module ##
 eval 'use File::MimeInfo::Magic qw/mimetype globs inodetype magic describe/;';
@@ -106,16 +122,19 @@ die $@ if $@;
 
 # --debug
 if ($args{debug}) {
-	$File::MimeInfo::DEBUG++;
-	$File::MimeInfo::Magic::DEBUG++;
-	print	'> Data dirs are: ', join( ', ',
-			$args{database}
-				? ( split /:/, $args{database} )
-				: (
-					File::BaseDir::xdg_data_home(),
-					File::BaseDir::xdg_data_dirs()
-				)
-		), "\n";
+    {
+        no warnings 'once';
+        $File::MimeInfo::DEBUG++;
+        $File::MimeInfo::Magic::DEBUG++;
+    }
+    print '> Data dirs are: ', join( ', ',
+            $args{database}
+                ? ( split /:/, $args{database} )
+                : (
+                    File::BaseDir::xdg_data_home(),
+                    File::BaseDir::xdg_data_dirs()
+                )
+        ), "\n";
 }
 
 # --file-compat
@@ -123,40 +142,48 @@ $args{describe}++ if $args{'file-compat'} && !$args{mimetype};
 
 # --namefile
 if ($args{namefile}) {
-	open IN, $args{namefile}
-		|| die "Couldn't open file: $args{namefile}\n";
-	unshift @ARGV, map {chomp; $_} (<IN>);
-	close IN;
+    open IN, '<', $args{namefile}
+        or die "Couldn't open file: $args{namefile}\n";
+    unshift @ARGV, map {chomp; $_} (<IN>);
+    close IN;
 }
 
 # --language
-$File::MimeInfo::LANG = $args{language} if $args{language};
+{
+    no warnings 'once';
+    $File::MimeInfo::LANG = $args{language} if $args{language};
+}
 
 # Formatting stuff
+my $name_of = -t STDOUT ? sub { cstring($_[0]) } : sub { $_[0] };
 my $l = 5; # "STDIN"
 unless ($args{brief} || $args{noalign}) {
-	for (@ARGV) { $l = length($_) if $l < length($_) }
+    for (@ARGV) { my $n = length $name_of->($_); $l = $n if $l < $n }
 }
 
 $args{separator} = ':' unless defined $args{separator};
 my $format = $args{'output-format'}
-	? parse_format($args{'output-format'})
-	: $args{brief}
-	? sub { $args{describe} ? desc($_[1]) : $_[1] }
-	: $args{noalign}
-	? sub { ( $_[0], $args{separator}, ' ', $args{describe} ? desc($_[1]) : $_[1] ) }
-	: sub { ( $_[0], $args{separator}, ' 'x($l + 1 - length($_[0])),
-		$args{describe} ? desc($_[1]) : $_[1] ) };
+    ? parse_format($args{'output-format'})
+    : $args{brief}
+    ? sub { $args{describe} ? desc($_[1]) : $_[1] }
+    : $args{noalign}
+    ? sub { ( $_[0], $args{separator}, ' ', $args{describe} ? desc($_[1]) : $_[1] ) }
+    : sub { ( $_[0], $args{separator}, ' 'x($l + 1 - length($_[0])),
+        $args{describe} ? desc($_[1]) : $_[1] ) };
 
 # --dereference
 if ($args{dereference}) {
-	eval 'use File::Spec';
-	die "Could not find perl module File::Spec\n" if $@;
+    eval 'use File::Spec';
+    die "Could not find perl module File::Spec\n" if $@;
 }
 # --stdin
 if ($args{stdin}) {
-	eval 'use IO::Scalar';
-	die "Could not find perl module IO::Scalar\n" if $@;
+    eval 'use IO::Scalar';
+    die "Could not find perl module IO::Scalar\n" if $@;
+}
+
+if (!File::MimeInfo::has_mimeinfo_database()) {
+    die "No mimeinfo database found\n";
 }
 
 # ######## #
@@ -165,28 +192,34 @@ if ($args{stdin}) {
 
 # --stdin
 if ($args{stdin}) {
-	my $data;
-	read(STDIN, $data, $File::MimeInfo::Magic::max_buffer);
-	my $scalar = new IO::Scalar \$data;
-	print $format->('STDIN', mimetype($scalar)), "\n";
-	exit;
+    my $data;
+    {
+        no warnings 'once';
+        read(STDIN, $data, $File::MimeInfo::Magic::max_buffer);
+    }
+    my $scalar = new IO::Scalar \$data;
+    print $format->('STDIN', mimetype($scalar)), "\n";
+    exit;
 }
 
 foreach my $file (@ARGV) {
-	# --dereference
-	my $f = ($args{dereference} && -l $file) ? resolvelink($file) : $file;
-	# --magic-only
-	if ($args{'magic-only'}) {
-		print $format->($file, magic($f) || default($f)), "\n";
-	}
-	# --all
-	elsif ($args{all}) {
-		for (qw#inodetype globs magic default#) {
-			my $m = eval "$_(\$f)";
-			print $format->($file, $m), "\n" if $m;
-		}
-	}
-	else { print $format->($file, mimetype($f)), "\n" }
+    # --dereference
+    my $f = ($args{dereference} && -l $file) ? resolvelink($file) : $file;
+    my $name = $name_of->($file);
+    # --magic-only
+    if ($args{'magic-only'}) {
+        print $format->($name, magic($f) || default($f)), "\n";
+    }
+    # --all
+    elsif ($args{all}) {
+        for (qw#inodetype globs magic default#) {
+            my $m = eval "$_(\$f)";
+            print $format->($name, $m), "\n" if $m;
+        }
+    }
+    else {
+        print $format->($name, mimetype($f)), "\n"
+    }
 }
 
 exit;
@@ -196,43 +229,40 @@ exit;
 # ########### #
 
 sub complain { # Error messages
-	my $opt = shift;
-	my $m = shift || 1;
+    my $opt = shift;
+    my $m = shift || 1;
 
-	my $bn = $0;
-	$bn =~ s|^(.*/)*||;
-	if ($m == 1) { print STDERR "$bn: unrecognized option '$opt'" }
-	elsif ($m == 2) { print STDERR "$bn: option '$opt' requires an argument" }
-	elsif ($m == 3) { print STDERR "$bn: $opt: No such file or directory\n" }
-	elsif ($m == 4) { print STDERR "usage: $bn [options] files" }
+    my $bn = $0;
+    $bn =~ s|^(.*/)*||;
+    if ($m == 1) { print STDERR "$bn: unrecognized option '$opt'" }
+    elsif ($m == 2) { print STDERR "$bn: option '$opt' requires an argument" }
+    elsif ($m == 3) { print STDERR "$bn: $opt: No such file or directory\n" }
+    elsif ($m == 4) { print STDERR "usage: $bn [options] files" }
 
-	print "\nTry '$bn --help' for more information.\n" unless $m == 3;
-	exit $m;
+    print "\nTry '$bn --help' for more information.\n" unless $m == 3;
+    exit $m;
 }
 
 sub parse_format { # Advanced formatting
-	my $form = shift;
-	my $code = "sub { '$form' }";
-	# code will get @_ = qw/file type/
-	$code =~ s/(?<!\\)%f/'.\$_[0].'/g;
-	$code =~ s/(?<!\\)%m/'.\$_[1].'/g;
-	$code =~ s/(?<!\\)%d/'.desc(\$_[1]).'/g;
-	return eval $code;
+    my $form = shift;
+    my $code = "sub { '$form' }";
+    # code will get @_ = qw/file type/
+    $code =~ s/(?<!\\)%f/'.\$_[0].'/g;
+    $code =~ s/(?<!\\)%m/'.\$_[1].'/g;
+    $code =~ s/(?<!\\)%d/'.desc(\$_[1]).'/g;
+    return eval $code;
 }
 
 sub resolvelink { # --dereference
-	my $file = shift;
-	my $link = readlink($file) || return $file;
-	my (undef, $dir, undef) = File::Spec->splitpath($file);
-	$link = File::Spec->rel2abs($link, $dir);
-	$link = resolvelink($link) if -l $link; # recurs
-	return $link;
+    my $file = shift;
+    require Cwd;
+    return Cwd::abs_path($file) // $file; # undef on cycles
 }
 
 sub desc { # Cache description
-	my $mt = shift;
-	return undef unless $mt;
-	$desc{$mt} ||= describe($mt) || describe($mt, ''); # second form overrules the language settings to default
+    my $mt = shift;
+    return undef unless $mt;
+    $desc{$mt} ||= describe($mt) || describe($mt, ''); # second form overrules the language settings to default
 }
 
 __END__
@@ -348,9 +378,9 @@ Do not align output fields.
 If you want an alternative output format, you can specify a format string
 containing the following escapes:
 
-	%f for the filename
-	%d description
-	%m mime type
+    %f for the filename
+    %d description
+    %m mime type
 
 Alignment is not available when using this,
 you need to post-process the output to do that.
@@ -382,9 +412,9 @@ mime-info will be expected in the "mime" sub directory of one of these
 directories. If these are not set, there will be searched for the
 following directories:
 
-	$HOME/.local/share/mime
-	/usr/local/share/mime
-	/usr/share/mime
+    $HOME/.local/share/mime
+    /usr/local/share/mime
+    /usr/share/mime
 
 See also the "XDG Base Directory Specification"
 L<http://freedesktop.org/Standards/basedir-spec>
@@ -437,7 +467,7 @@ mime-typing method. This needs to be implemented in the modules first.
 =head1 BUGS
 
 If you find bugs, please file them in our Github
-issue tracker at L<https://github.com/mbeijen/File-MimeInfo/issues>.
+issue tracker at L<https://codeberg.org/michielb/File-MimeInfo/issues>.
 
 B<mimetype> doesn't provide a switch for looking inside compressed files
 because it seems to me that this can only be done by un-compressing the file,
@@ -448,11 +478,12 @@ made for this one day.
 =head1 AUTHOR
 
 Jaap Karssenberg E<lt>pardus@cpan.orgE<gt>
-Maintained by Michiel Beijen E<lt>michiel.beijen@gmail.comE<gt>
+Maintained by Michiel Beijen E<lt>mb@x14.nlE<gt>
 
 =head1 COPYRIGHT
 
 Copyright (c) 2003, 2012 Jaap G Karssenberg. All rights reserved.
+Copyright (c) 2013-2026 Michiel W. Beijen. All rights reserved.
 This program is free software; you can redistribute it and/or
 modify it under the same terms as Perl.
 

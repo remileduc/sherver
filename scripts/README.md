@@ -319,6 +319,26 @@ will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
      RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
 
 
+`_get_mimetype()`
+-----------------
+
+Internal: Print the mime type of the given file.
+
+**Note:** this method is used by `send_file()` and shouldn't be called manually.
+
+Uses the `mimetype` command installed on the system if there is one (Debian ships it in `libfile-mimeinfo-perl`), and falls back to the copy vendored in `scripts/utils/` otherwise. The vendored copy is resolved relatively to this library, because `run_script()` `cd`s into `scripts/`.
+
+* $1 - the path to the file to inspect
+
+Examples
+
+     _get_mimetype '/home/sherver/sherver/file/beautiful.png'
+
+will print
+
+     image/png
+
+
 `send_file()`
 -------------
 
@@ -330,7 +350,7 @@ It will automatically create a valid HTTP response that will stream the content 
 
 The path generally comes from the URL (`URL_BASE`). You just need to remove the first `/` to get a relative path.
 
-*Note* that to find the correct mimetype, we use `mimetype` script which is shipped by default in Debian.
+*Note* that to find the correct mimetype, we use `_get_mimetype()`, which relies on the `mimetype` command installed on the system, or on the copy vendored in `scripts/utils/`.
 
 * $1 - the path to the file to send
 

@@ -378,4 +378,4 @@ License
 
 Everything is under MIT License.
 
-We use `mimetype` script, shipped in [scripts/utils/mimetype](./scripts/utils/mimetype), which is under Perl license.
+We use `mimetype` script, shipped in [scripts/utils/mimetype](./scripts/utils/mimetype), which is under Perl license, coming from <https://codeberg.org/michielb/File-MimeInfo/src/commit/d5fe134cc0127236731385ffc77de8d4fd89bfc2/mimetype>.

@@ -449,6 +449,34 @@ function _resolve_path()
 }
 export -f _resolve_path
 
+# Internal: Print the mime type of the given file.
+#
+# **Note:** this method is used by `send_file()` and shouldn't be called manually.
+#
+# Uses the `mimetype` command installed on the system if there is one (Debian ships it
+# in `libfile-mimeinfo-perl`), and falls back to the copy vendored in `scripts/utils/`
+# otherwise. The vendored copy is resolved relatively to this library, because
+# `run_script()` `cd`s into `scripts/`.
+#
+# $1 - the path to the file to inspect
+#
+# Examples
+#
+#    _get_mimetype '/home/sherver/sherver/file/beautiful.png'
+#
+# will print
+#
+#    image/png
+function _get_mimetype()
+{
+	local mimetype
+	if ! mimetype=$(command -v 'mimetype'); then
+		mimetype="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/utils/mimetype"
+	fi
+	"$mimetype" -b "$1"
+}
+export -f _get_mimetype
+
 # Public: Try to send the given file, or fail with 404.
 #
 # Takes the path to the file to send as a parameter.
@@ -460,8 +488,8 @@ export -f _resolve_path
 # The path generally comes from the URL (`URL_BASE`). You just need to remove the first
 # `/` to get a relative path.
 #
-# *Note* that to find the correct mimetype, we use `mimetype` script which is shipped
-# by default in Debian.
+# *Note* that to find the correct mimetype, we use `_get_mimetype()`, which relies on the
+# `mimetype` command installed on the system, or on the copy vendored in `scripts/utils/`.
 #
 # $1 - the path to the file to send
 #
@@ -494,7 +522,7 @@ function send_file()
 	else
 		# HTTP header
 		local content_type content_length
-		content_type=$("$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/utils/mimetype" -b "$file")
+		content_type=$(_get_mimetype "$file")
 		content_length=$(stat -c '%s' "$file")
 		add_header 'Content-Type'   "$content_type";
 		add_header 'Content-Length' "$content_length"
