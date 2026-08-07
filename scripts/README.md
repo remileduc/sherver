@@ -252,6 +252,8 @@ Takes the response code as first parameter, then as many parameters as needed to
 
 Call it with the code alone to send no body at all, as a 304 requires. The body is also dropped on its own when the client sent a HEAD request.
 
+`Content-Length` is computed and added automatically, except for a 304.
+
 At the end of the function, we call exit to terminate the process.
 
 Note that the headers need to have already been set with `add_header()`.

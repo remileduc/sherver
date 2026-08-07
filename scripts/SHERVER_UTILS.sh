@@ -330,6 +330,8 @@ export -f _send_header
 # Call it with the code alone to send no body at all, as a 304 requires. The body is also
 # dropped on its own when the client sent a HEAD request.
 #
+# `Content-Length` is computed and added automatically, except for a 304.
+#
 # At the end of the function, we call exit to terminate the process.
 #
 # Note that the headers need to have already been set with `add_header()`.
@@ -354,12 +356,24 @@ export -f _send_header
 # ```
 function send_response()
 {
-	# HTTP header
-	_send_header "$1"
+	local -r code="$1"
 	shift
+	local i
+	# a 304 carries the `Content-Length` of the answer it replaces, which we don't know here
+	if [ "$code" != '304' ]; then
+		# `${#}` counts characters, where `Content-Length` counts bytes
+		local LC_ALL=C
+		local -i length=0
+		for i in "$@"; do
+			# every argument is written with a trailing newline below
+			length+=${#i}+1
+		done
+		add_header 'Content-Length' "$length"
+	fi
+	# HTTP header
+	_send_header "$code"
 	# response
 	if [ "$REQUEST_METHOD" != 'HEAD' ]; then
-		local i
 		for i in "$@"; do
 			printf '%s\n' "$i"
 		done
