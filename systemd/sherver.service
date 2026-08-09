@@ -1,0 +1,84 @@
+# MIT License
+#
+# Sherver: Pure Bash lightweight web server.
+# Copyright (c) 2019 Rémi Ducceschi
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# systemd service unit file that starts sherver.sh
+[Unit]
+Description=Sherver, a pure Bash web server
+Documentation=https://github.com/remileduc/sherver
+After=network.target
+
+[Service]
+# exec: sherver.sh exec's socat, so the main process is the listener itself. No ExecStop
+# is needed, SIGTERM reaches socat directly and systemd reaps the forked children
+Type=exec
+
+User=sherver
+Group=sherver
+
+WorkingDirectory=/home/sherver/sherver/
+Environment=SHERVER_PORT=8080
+# set SHERVER_DEBUG=1 here (or with `systemctl edit`) to log the full requests and responses
+ExecStart=/home/sherver/sherver/sherver.sh $SHERVER_PORT
+
+Restart=always
+RestartSec=1
+
+SyslogIdentifier=sherver
+
+# socat forks a dispatcher per connection, and each one forks bash plus a few utilities:
+# cap the tree so a burst of requests can't take the machine down with it
+TasksMax=256
+MemoryMax=512M
+
+# Sandboxing. `ProtectHome` is read-only rather than yes, because the website lives in /home
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectProc=invisible
+ProcSubset=pid
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+# AF_UNIX for the journal socket and NSS, AF_NETLINK for glibc's address lookups
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# May prevent JIT code execution (python, node, ...)
+MemoryDenyWriteExecute=yes
+
+# Comment these two out if a script calls `sudo`: it is setuid, so it needs to gain the
+# privileges the first one forbids and the capabilities the second one drops
+# Also check `ProtectSystem` as it may prevent sudo from writing files
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+
+# Give back only what a script really needs. `ReadWritePaths` punches a hole in the read-only
+# file system, and the whole address family list has to be repeated, not just the addition
+#ReadWritePaths=/home/sherver/sherver/file/uploads
+#RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+
+[Install]
+WantedBy=multi-user.target

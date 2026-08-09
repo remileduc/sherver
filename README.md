@@ -40,6 +40,7 @@ This is inspired by [bashttpd](https://github.com/avleen/bashttpd). Though, the 
 - [Logs](#logs)
 - [Dispatcher](#dispatcher)
 - [Run as a service (daemon)](#run-as-a-service-daemon)
+	- [Sandboxing](#sandboxing)
 
 [Example](#example)
 
@@ -356,15 +357,37 @@ git checkout perso
 ```
 
 Finally, we need to enable the service so it starts `sherver.sh` automatically. To do so,
-copy the file [sherver.service](./sherver.service) in `/usr/share/systemd/` and then
-enable the service:
+enable the file [systemd/sherver.service](./systemd/sherver.service). Giving `systemctl enable` an
+absolute path symlinks the unit from the checkout into `/etc/systemd/system/`, so a `git pull`
+updates it:
 
 ```bash
-cp sherver.service /usr/share/systemd/
-ln -s /usr/share/systemd/sherver.service /etc/systemd/system/sherver.service
-systemctl daemon-reload
-systemctl enable sherver.service
+systemctl enable --now /home/sherver/sherver/systemd/sherver.service
 ```
+
+If `/home` is a separate, encrypted or network mount, systemd may not be able to read the unit
+when it loads its configuration at boot. Copy it instead:
+
+```bash
+cp systemd/sherver.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now sherver.service
+```
+
+The unit assumes the website is in `/home/sherver/sherver/` and listens on port 8080. Both, and the
+sandboxing below, are overridden without touching the file:
+
+```bash
+systemctl edit sherver.service
+	[Service]
+	Environment=SHERVER_PORT=8000
+```
+
+#### Sandboxing ####
+
+The unit runs the server under most of the systemd sandboxing options: a read-only file system, a
+private `/tmp` and `/dev`, no access to the kernel interfaces, and a system call filter. It also caps
+the process tree, because `socat` forks a dispatcher per connection and each one forks a few more.
 
 Example
 -------
