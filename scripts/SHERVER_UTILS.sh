@@ -253,6 +253,8 @@ function parse_url()
 		# `+` is a space in a query string, but stays a `+` in the path above
 		_url_decode key "${key//+/ }"
 		_url_decode value "${value//+/ }"
+		# read by the child scripts, which shellcheck can't see from here
+		# shellcheck disable=SC2034
 		URL_PARAMETERS["$key"]="$value"
 	done
 }
@@ -274,7 +276,7 @@ export -f parse_url
 #    Content-Type: text/html; charset=utf-8
 function add_header()
 {
-   RESPONSE_HEADERS["$1"]="$2"
+	RESPONSE_HEADERS["$1"]="$2"
 }
 export -f add_header
 
@@ -727,6 +729,8 @@ $line"
 				# `+` is a space in urlencoded content
 				_url_decode key "${key//+/ }"
 				_url_decode value "${value//+/ }"
+				# read by the child scripts, which shellcheck can't see from here
+				# shellcheck disable=SC2034
 				REQUEST_BODY_PARAMETERS["$key"]="$value"
 			done
 		fi

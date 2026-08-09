@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  lint:
+    name: Code quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install shellcheck
+          sudo apt-get clean
+          shellcheck --version
+
+      # not committed (see .gitignore), and the generated documentation check
+      # skips silently without it.
+      - name: Install tomdoc.sh
+        run: |
+          wget https://raw.githubusercontent.com/mlafeldt/tomdoc.sh/refs/heads/master/tomdoc.sh
+          chmod +x tomdoc.sh
+          ./tomdoc.sh --version
+
+      - name: Lint
+        run: ./tests/lint.sh
