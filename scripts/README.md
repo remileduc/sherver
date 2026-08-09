@@ -200,6 +200,26 @@ will result in
      )
 
 
+`html_escape()`
+---------------
+
+Public: Print the given string with the HTML special characters escaped.
+
+Everything coming from the request (the URL, its parameters, the headers, the body...) is written by the client. A script that drops it in a page as is lets that client inject its own markup, so escape it, always. Best done at the point where the value is inserted, so that no unescaped copy is left around to be used by mistake.
+
+The 5 escaped characters cover text inside an element and the value of a quoted attribute. An unquoted attribute, a `<script>` or a `<style>` need more than this, and are a bad place to put anything the client sent in the first place.
+
+* $1 - the string to escape
+
+Examples
+
+     html_escape '<script>alert(1)</script>'
+
+will print
+
+     &lt;script&gt;alert(1)&lt;/script&gt;
+
+
 `add_header()`
 --------------
 

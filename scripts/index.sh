@@ -29,7 +29,7 @@ fi
 
 all_params=''
 for key in "${!URL_PARAMETERS[@]}"; do
-	all_params="$all_params$key: ${URL_PARAMETERS[$key]}
+	all_params="$all_params$(html_escape "$key"): $(html_escape "${URL_PARAMETERS[$key]}")
 "
 done
 
@@ -55,13 +55,13 @@ BODY_TEMPLATE=$(cat <<EOF
 		Requested URL (try with <a href="/index.sh?test=youpi&answer=42"><code>index.sh?test=youpi&answer=42</code></a>):
 		<pre>
 	REQUESTED URL:
-$REQUEST_URL
+$(html_escape "$REQUEST_URL")
 	BASE URL:
-$URL_BASE
+$(html_escape "$URL_BASE")
 	PARAMETERS:
 $all_params
 	FULL REQUEST:
-$REQUEST_FULL_STRING
+$(html_escape "$REQUEST_FULL_STRING")
 		</pre>
 	</section>
 

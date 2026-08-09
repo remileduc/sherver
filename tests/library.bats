@@ -164,3 +164,20 @@ image/jpeg' ]
 	[ "$status" -eq 0 ]
 	[ "$output" = 'application/octet-stream' ]
 }
+
+# -------------------------------------------------------------- html_escape
+
+@test "html_escape escapes the 5 HTML special characters" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' \
+		"html_escape '<a href=\"x\">R&D'\''s</a>'"
+	[ "$status" -eq 0 ]
+	[ "$output" = '&lt;a href=&quot;x&quot;&gt;R&amp;D&#39;s&lt;/a&gt;' ]
+}
+
+@test "html_escape does not double escape the entities it just wrote" {
+	# a bare '&' in a replacement is the matched text since bash 5.2, which would
+	# turn '<' into '<lt;' instead of '&lt;'
+	run --separate-stderr with_request 'GET / HTTP/1.0' "html_escape 'a&b<c'"
+	[ "$status" -eq 0 ]
+	[ "$output" = 'a&amp;b&lt;c' ]
+}

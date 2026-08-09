@@ -62,9 +62,11 @@ Just clone and run `./sherver.sh`. Then, you should be able to connect to [local
 ### Requirements ###
 
 This is made to run with `Bash`. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
-- `envsubst` if you want to do templating
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
+- `date`, `realpath`, `stat` and `cat` that all come from `coreutils` 
+- optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base`)
+- for development: `bats` and `shellcheck` for the tests.
 
 ### Features ###
 

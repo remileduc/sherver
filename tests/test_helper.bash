@@ -90,21 +90,13 @@ function status_line()
 	head -n 1 -- "$RESPONSE" | tr -d '\r'
 }
 
-# Internal: Print the number of the line that closes the headers, CR included.
+# Internal: Print the number of the line that closes the headers.
 #
-# Done in bash rather than with grep, because `grep` is not always GNU grep and the
-# ones that answer to that name disagree on what `-m` means.
+# The pattern needs `$'...'`: the CR has to be a real one, `'\r'` is a backslash
+# followed by an `r` and matches nothing.
 function _header_lines()
 {
-	local -i count=0
-	local line
-	while IFS= read -r line; do
-		count+=1
-		if [ "$line" = $'\r' ]; then
-			break
-		fi
-	done < "$RESPONSE"
-	printf '%s\n' "$count"
+	grep -a -n -m 1 $'^\r$' -- "$RESPONSE" | cut -d ':' -f 1
 }
 
 # Public: Print the value of the given response header, or nothing if it is absent.
@@ -119,19 +111,8 @@ function _header_lines()
 #    [ "$(header Content-Type)" = 'text/html; charset=utf-8' ]
 function header()
 {
-	local -r wanted="${1,,}"
-	local line name
-	while IFS= read -r line; do
-		line="${line%$'\r'}"
-		if [ -z "$line" ]; then
-			break
-		fi
-		# the status line holds no `: `, so it never matches a header name
-		name="${line%%: *}"
-		if [ "${name,,}" = "$wanted" ]; then
-			printf '%s\n' "${line#*: }"
-		fi
-	done < "$RESPONSE"
+	head -n "$(_header_lines)" -- "$RESPONSE" | tr -d '\r' \
+		| grep -i "^$1: " | cut -d ' ' -f 2-
 }
 
 # Public: Print every header name of the last response, lowercased and sorted.
@@ -140,20 +121,8 @@ function header()
 # not something a test can rely on.
 function header_names()
 {
-	local line name
-	local -i first=1
-	while IFS= read -r line; do
-		line="${line%$'\r'}"
-		if [ -z "$line" ]; then
-			break
-		fi
-		if [ "$first" -eq 1 ]; then
-			first=0
-			continue
-		fi
-		name="${line%%: *}"
-		printf '%s\n' "${name,,}"
-	done < "$RESPONSE" | sort
+	head -n "$(( $(_header_lines) - 1 ))" -- "$RESPONSE" | tail -n +2 | tr -d '\r' \
+		| cut -d ':' -f 1 | tr '[:upper:]' '[:lower:]' | sort
 }
 
 # Public: Print the body of the last response, byte for byte.

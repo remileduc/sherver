@@ -172,6 +172,7 @@ X-MiXeD-CaSe: yes' \
 	request '' 'GET / HTTP/1.0'
 	[ "$(header Server)" = 'Sherver' ]
 	[ "$(header Connection)" = 'close' ]
+	[ "$(header X-Content-Type-Options)" = 'nosniff' ]
 	[ -n "$(header Date)" ]
 	[ -n "$(header Expires)" ]
 }
@@ -184,4 +185,14 @@ X-MiXeD-CaSe: yes' \
 @test "an error page announces its own length" {
 	request '' 'GET /nope.sh HTTP/1.0'
 	[ "$(header Content-Length)" = "$(body | wc -c)" ]
+}
+
+@test "index.sh escapes what the client sent instead of reflecting it" {
+	request '' 'GET /index.sh?%3Cscript%3E=%3Cimg+onerror%3Dalert(1)%3E HTTP/1.0' \
+		'X-Evil: <script>alert(2)</script>'
+	[ "$(status_code)" = '200' ]
+	# nothing the client wrote may come back as markup
+	body > "$BATS_TEST_TMPDIR/page"
+	! grep -qe '<script>alert' -e '<img onerror' "$BATS_TEST_TMPDIR/page"
+	grep -q '&lt;script&gt;alert(2)&lt;/script&gt;' "$BATS_TEST_TMPDIR/page"
 }

@@ -87,6 +87,7 @@ function init_environment()
 	declare -Ag RESPONSE_HEADERS=(
 		[Server]='Sherver'
 		[Connection]='close'
+		[X-Content-Type-Options]='nosniff'
 		[Cache-Control]='private, max-age=60'
 		#[Cache-Control]='private, max-age=0, no-cache, no-store, must-revalidate'
 	)
@@ -259,6 +260,39 @@ function parse_url()
 	done
 }
 export -f parse_url
+
+# Public: Print the given string with the HTML special characters escaped.
+#
+# Everything coming from the request (the URL, its parameters, the headers, the body...) is
+# written by the client. A script that drops it in a page as is lets that client inject its
+# own markup, so escape it, always. Best done at the point where the value is inserted, so
+# that no unescaped copy is left around to be used by mistake.
+#
+# The 5 escaped characters cover text inside an element and the value of a quoted attribute.
+# An unquoted attribute, a `<script>` or a `<style>` need more than this, and are a bad place
+# to put anything the client sent in the first place.
+#
+# $1 - the string to escape
+#
+# Examples
+#
+#    html_escape '<script>alert(1)</script>'
+#
+# will print
+#
+#    &lt;script&gt;alert(1)&lt;/script&gt;
+function html_escape()
+{
+	# `&` first, or we would escape the `&` of the entities added below. The `\&` are
+	# mandatory: since bash 5.2, a bare `&` in a replacement means the matched text
+	local escaped="${1//&/\&amp;}"
+	escaped="${escaped//</\&lt;}"
+	escaped="${escaped//>/\&gt;}"
+	escaped="${escaped//\"/\&quot;}"
+	escaped="${escaped//\'/\&#39;}"
+	printf '%s\n' "$escaped"
+}
+export -f html_escape
 
 # Public: Add header for the response.
 #
