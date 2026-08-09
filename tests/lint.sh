@@ -23,8 +23,13 @@ cd "$(dirname "$0")/.."
 declare -r LIBRARY='scripts/SHERVER_UTILS.sh'
 declare -i FAILURES=0
 
-# Every shell file we own, straight from git: it already knows about `tomdoc.sh` and
-# the rest of `.gitignore`, and a file nobody committed is not ours to check.
+# Every file we wrote, straight from git: it already knows about `tomdoc.sh` and the
+# rest of `.gitignore`, and a file nobody committed is not ours to check.
+declare -a SOURCE_FILES
+mapfile -t SOURCE_FILES < <(git ls-files -- '*.sh' '*.bash' '*.bats')
+
+# What bash itself can read. A `.bats` file is not valid bash until bats has rewritten
+# its `@test` blocks, so neither shellcheck nor `bash -n` can say anything about it.
 declare -a SHELL_FILES
 mapfile -t SHELL_FILES < <(git ls-files -- '*.sh' '*.bash')
 
@@ -32,6 +37,10 @@ mapfile -t SHELL_FILES < <(git ls-files -- '*.sh' '*.bash')
 # tests: `-f` leaks from a helper into every test body and breaks globbing there.
 declare -a STANDALONE_SCRIPTS
 mapfile -t STANDALONE_SCRIPTS < <(git ls-files -- '*.sh')
+
+# Test files, which only bats can parse.
+declare -a BATS_FILES
+mapfile -t BATS_FILES < <(git ls-files -- '*.bats')
 
 # Every check below walks a list of files, so an empty list would make all of them
 # pass without looking at anything. Fail loudly instead.
@@ -108,6 +117,24 @@ function check_syntax()
 	report 'does not parse:' "${broken[@]}"
 }
 
+# Internal: Same for the test files, which only bats can parse.
+#
+# `--count` stops after collecting the tests, so it reports a syntax error without
+# running anything.
+function check_bats_syntax()
+{
+	if ! command -v bats > /dev/null; then
+		echo 'bats is not installed'
+		return 77
+	fi
+	local file
+	local -a broken=()
+	for file in "${BATS_FILES[@]}"; do
+		bats --count "$file" > /dev/null || broken+=("$file")
+	done
+	report 'does not parse:' "${broken[@]}"
+}
+
 # Internal: `-e -f -u` is the contract every script relies on, `-f` especially:
 # an unquoted expansion would otherwise glob against the server's own files.
 function check_shell_options()
@@ -125,7 +152,7 @@ function check_license()
 {
 	local file
 	local -a missing=()
-	for file in "${SHELL_FILES[@]}"; do
+	for file in "${SOURCE_FILES[@]}"; do
 		grep -q 'MIT License' "$file" || missing+=("$file")
 	done
 	report 'missing the MIT header:' "${missing[@]}"
@@ -139,11 +166,11 @@ function check_whitespace()
 {
 	local -i status=0
 	local -a found=()
-	mapfile -t found < <(grep -nP '^\t* +' -- "${SHELL_FILES[@]}")
+	mapfile -t found < <(grep -nP '^\t* +' -- "${SOURCE_FILES[@]}")
 	report 'indented with spaces:' "${found[@]}" || status=1
-	mapfile -t found < <(grep -nP '[ \t]+$' -- "${SHELL_FILES[@]}")
+	mapfile -t found < <(grep -nP '[ \t]+$' -- "${SOURCE_FILES[@]}")
 	report 'trailing whitespace:' "${found[@]}" || status=1
-	mapfile -t found < <(grep -lP '\r$' -- "${SHELL_FILES[@]}")
+	mapfile -t found < <(grep -lP '\r$' -- "${SOURCE_FILES[@]}")
 	report 'CRLF line endings:' "${found[@]}" || status=1
 	return "$status"
 }
@@ -202,7 +229,7 @@ function check_error_codes()
 	local -a unknown=()
 	while read -r code; do
 		[ -v "known[$code]" ] || unknown+=("$code")
-	done < <(grep -rhoP 'send_error \K[0-9]+' -- "${SHELL_FILES[@]}" | sort -u)
+	done < <(grep -rhoP 'send_error \K[0-9]+' -- "${SOURCE_FILES[@]}" | sort -u)
 	report "sent by send_error but absent from HTTP_RESPONSE:" "${unknown[@]}"
 }
 
@@ -249,10 +276,11 @@ function check_generated_readme()
 	return "$status"
 }
 
-printf 'Checking %s shell files\n\n' "${#SHELL_FILES[@]}"
+printf 'Checking %s files\n\n' "${#SOURCE_FILES[@]}"
 
 check 'shellcheck'                    check_shellcheck
 check 'syntax (bash -n)'              check_syntax
+check 'syntax (bats)'                 check_bats_syntax
 check 'set -efu'                      check_shell_options
 check 'MIT header'                    check_license
 check 'whitespace'                    check_whitespace

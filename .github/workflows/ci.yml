@@ -15,12 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install shellcheck
+      - name: Install shellcheck and bats
         run: |
           sudo apt-get update
-          sudo apt-get install shellcheck
+          sudo apt-get install -y shellcheck bats
           sudo apt-get clean
           shellcheck --version
+          bats --version
 
       # not committed (see .gitignore), and the generated documentation check
       # skips silently without it.
@@ -32,3 +33,20 @@ jobs:
 
       - name: Lint
         run: ./tests/lint.sh
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats socat gettext-base libfile-mimeinfo-perl
+          sudo apt-get clean
+          bats --version
+          mimetype --version
+
+      - name: Run tests
+        run: bats --print-output-on-failure tests/
