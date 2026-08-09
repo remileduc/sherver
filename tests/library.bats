@@ -140,3 +140,27 @@ ko %g0' ]
 	[ "$status" -eq 0 ]
 	[[ $output != *'Content-Length'* ]]
 }
+
+# ------------------------------------------------------------- _get_mimetype
+
+@test "_get_mimetype matches the extension whatever its case" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' \
+		'_get_mimetype "/file/PHOTO.JPG"; _get_mimetype "/file/photo.jpg"'
+	[ "$status" -eq 0 ]
+	[ "$output" = 'image/jpeg
+image/jpeg' ]
+}
+
+@test "_get_mimetype falls back to octet-stream and logs it" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' '_get_mimetype "/file/archive.xyz"'
+	[ "$status" -eq 0 ]
+	[ "$output" = 'application/octet-stream' ]
+	[[ $stderr == *'unknown extension'* ]]
+}
+
+@test "_get_mimetype ignores a dot that belongs to a parent directory" {
+	# '${path##*.}' alone would read 'd/README' as the extension here
+	run --separate-stderr with_request 'GET / HTTP/1.0' '_get_mimetype "/file/conf.d/README"'
+	[ "$status" -eq 0 ]
+	[ "$output" = 'application/octet-stream' ]
+}

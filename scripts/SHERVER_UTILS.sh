@@ -465,18 +465,19 @@ function _resolve_path()
 }
 export -f _resolve_path
 
-# Internal: Print the mime type of the given file.
+# Internal: Print the mime type of the given file, deduced from its extension.
 #
 # **Note:** this method is used by `send_file()` and shouldn't be called manually.
 #
-# Uses the `mimetype` command installed on the system if there is one (Debian ships it
-# in `libfile-mimeinfo-perl`), and falls back to the copy vendored in `scripts/utils/`
-# otherwise. The vendored copy is resolved relatively to this library, because
-# `run_script()` `cd`s into `scripts/`.
+# The type comes from a static table, the way nginx and Apache do it: for a static file
+# server the extension is the authoritative signal.
 #
-# `XDG_DATA_HOME` is pointed at a dead end so that only the system mime database is used:
-# a desktop session can map `*.html` to `application/x-extension-html`, and what we serve
-# must not depend on the associations of the account running the server.
+# An unknown or missing extension gives `application/octet-stream`, so that the browser
+# downloads the file instead of guessing how to render it. Since we own everything under
+# `file/`, that case means the table is missing an entry: it is logged.
+#
+# `text/*` types carry `; charset=utf-8`. The others don't: `application/json` and the
+# image types have no charset parameter.
 #
 # $1 - the path to the file to inspect
 #
@@ -489,11 +490,106 @@ export -f _resolve_path
 #    image/png
 function _get_mimetype()
 {
-	local mimetype
-	if ! mimetype=$(command -v 'mimetype'); then
-		mimetype="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/utils/mimetype"
+	local -rA MIME_TYPES=(
+		['css']='text/css; charset=utf-8'
+		['csv']='text/csv; charset=utf-8'
+		['htm']='text/html; charset=utf-8'
+		['html']='text/html; charset=utf-8'
+		['ics']='text/calendar; charset=utf-8'
+		['js']='text/javascript; charset=utf-8'
+		['md']='text/markdown; charset=utf-8'
+		['mjs']='text/javascript; charset=utf-8'
+		['txt']='text/plain; charset=utf-8'
+		['vtt']='text/vtt; charset=utf-8'
+		['atom']='application/atom+xml'
+		['json']='application/json'
+		['jsonld']='application/ld+json'
+		['map']='application/json'
+		['pdf']='application/pdf'
+		['rss']='application/rss+xml'
+		['srt']='application/x-subrip'
+		['toml']='application/toml'
+		['wasm']='application/wasm'
+		['webmanifest']='application/manifest+json'
+		['xhtml']='application/xhtml+xml'
+		['xml']='application/xml'
+		['yaml']='application/yaml'
+		['yml']='application/yaml'
+		['docx']='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+		['epub']='application/epub+zip'
+		['odp']='application/vnd.oasis.opendocument.presentation'
+		['ods']='application/vnd.oasis.opendocument.spreadsheet'
+		['odt']='application/vnd.oasis.opendocument.text'
+		['pptx']='application/vnd.openxmlformats-officedocument.presentationml.presentation'
+		['rtf']='application/rtf'
+		['xlsx']='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+		['7z']='application/x-7z-compressed'
+		['bz2']='application/x-bzip2'
+		['deb']='application/vnd.debian.binary-package'
+		['gz']='application/gzip'
+		['rar']='application/vnd.rar'
+		['rpm']='application/x-rpm'
+		['tar']='application/x-tar'
+		['tgz']='application/gzip'
+		['xz']='application/x-xz'
+		['zip']='application/zip'
+		['zst']='application/zstd'
+		# explicit, so that a deliberately opaque download doesn't log a missing entry
+		['bin']='application/octet-stream'
+		['apng']='image/apng'
+		['avif']='image/avif'
+		['bmp']='image/bmp'
+		['gif']='image/gif'
+		['heic']='image/heic'
+		['heif']='image/heif'
+		['ico']='image/vnd.microsoft.icon'
+		['jpeg']='image/jpeg'
+		['jpg']='image/jpeg'
+		['jxl']='image/jxl'
+		['png']='image/png'
+		['svg']='image/svg+xml'
+		['tif']='image/tiff'
+		['tiff']='image/tiff'
+		['webp']='image/webp'
+		['otf']='font/otf'
+		['ttc']='font/collection'
+		['ttf']='font/ttf'
+		['woff']='font/woff'
+		['woff2']='font/woff2'
+		['aac']='audio/aac'
+		['flac']='audio/flac'
+		['m4a']='audio/mp4'
+		['mp3']='audio/mpeg'
+		['oga']='audio/ogg'
+		['ogg']='audio/ogg'
+		['opus']='audio/ogg'
+		['wav']='audio/wav'
+		['weba']='audio/webm'
+		['3gp']='video/3gpp'
+		['avi']='video/x-msvideo'
+		['m4v']='video/mp4'
+		['mkv']='video/x-matroska'
+		['mov']='video/quicktime'
+		['mp4']='video/mp4'
+		['mpeg']='video/mpeg'
+		['mpg']='video/mpeg'
+		['ogv']='video/ogg'
+		['webm']='video/webm'
+	)
+
+	# the basename first: a dot in a parent directory is not an extension
+	local -r name="${1##*/}"
+	local ext="${name##*.}"
+	# no dot at all: the expansion above gave back the whole name
+	[ "$ext" != "$name" ] || ext=''
+	ext="${ext,,}"
+
+	if [ ! -v "MIME_TYPES[$ext]" ]; then
+		log "unknown extension '$ext' for '$1', serving it as application/octet-stream"
+		printf '%s\n' 'application/octet-stream'
+		return 0
 	fi
-	XDG_DATA_HOME='/dev/null' "$mimetype" -b "$1"
+	printf '%s\n' "${MIME_TYPES[$ext]}"
 }
 export -f _get_mimetype
 
@@ -508,8 +604,8 @@ export -f _get_mimetype
 # The path generally comes from the URL (`URL_BASE`). You just need to remove the first
 # `/` to get a relative path.
 #
-# *Note* that to find the correct mimetype, we use `_get_mimetype()`, which relies on the
-# `mimetype` command installed on the system, or on the copy vendored in `scripts/utils/`.
+# *Note* that to find the correct mimetype, we use `_get_mimetype()`, which deduces it from
+# the extension of the file.
 #
 # $1 - the path to the file to send
 #

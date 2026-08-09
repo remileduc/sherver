@@ -25,7 +25,7 @@ load 'test_helper'
 	cmp "$BATS_TEST_TMPDIR/served" "$REPO_ROOT/file/venise.webp"
 }
 
-@test "the mime type comes from the content, not from a desktop association" {
+@test "the mime type comes from the extension, and text types announce utf-8" {
 	local file type
 	while read -r file type; do
 		request '' "GET /file/$file HTTP/1.0"
@@ -34,8 +34,8 @@ load 'test_helper'
 	done <<-'EOF'
 		venise.webp           image/webp
 		resources/zergian.png image/png
-		resources/ugly.css    text/css
-		pages/page.html       text/html
+		resources/ugly.css    text/css; charset=utf-8
+		pages/page.html       text/html; charset=utf-8
 	EOF
 }
 
@@ -93,7 +93,7 @@ load 'test_helper'
 	# page.sh runs from scripts/, so it reaches the page through ../file/
 	request '' 'GET /page.sh?page=page.html HTTP/1.0'
 	[ "$(status_code)" = '200' ]
-	[ "$(header Content-Type)" = 'text/html' ]
+	[ "$(header Content-Type)" = 'text/html; charset=utf-8' ]
 }
 
 @test "page.sh without its parameter is a 404" {

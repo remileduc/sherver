@@ -324,13 +324,15 @@ will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
 `_get_mimetype()`
 -----------------
 
-Internal: Print the mime type of the given file.
+Internal: Print the mime type of the given file, deduced from its extension.
 
 **Note:** this method is used by `send_file()` and shouldn't be called manually.
 
-Uses the `mimetype` command installed on the system if there is one (Debian ships it in `libfile-mimeinfo-perl`), and falls back to the copy vendored in `scripts/utils/` otherwise. The vendored copy is resolved relatively to this library, because `run_script()` `cd`s into `scripts/`.
+The type comes from a static table, the way nginx and Apache do it: for a static file server the extension is the authoritative signal.
 
-`XDG_DATA_HOME` is pointed at a dead end so that only the system mime database is used: a desktop session can map `*.html` to `application/x-extension-html`, and what we serve must not depend on the associations of the account running the server.
+An unknown or missing extension gives `application/octet-stream`, so that the browser downloads the file instead of guessing how to render it. Since we own everything under `file/`, that case means the table is missing an entry: it is logged.
+
+`text/*` types carry `; charset=utf-8`. The others don't: `application/json` and the image types have no charset parameter.
 
 * $1 - the path to the file to inspect
 
@@ -354,7 +356,7 @@ It will automatically create a valid HTTP response that will stream the content 
 
 The path generally comes from the URL (`URL_BASE`). You just need to remove the first `/` to get a relative path.
 
-*Note* that to find the correct mimetype, we use `_get_mimetype()`, which relies on the `mimetype` command installed on the system, or on the copy vendored in `scripts/utils/`.
+*Note* that to find the correct mimetype, we use `_get_mimetype()`, which deduces it from the extension of the file.
 
 * $1 - the path to the file to send
 
