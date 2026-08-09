@@ -88,6 +88,13 @@ Public: Biggest request line + headers we accept to read, in characters
 
 They land in `REQUEST_FULL_STRING` too, so they share the 128 kio limit of `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if every header character takes 4 bytes.
 
+`DEBUG_LOG`
+-----------
+
+Public: `true` when verbose logging is on, see `log_debug()`
+
+Read from the environment because that is the only channel that survives the exec into a child script: `sherver.sh --debug` exports `SHERVER_DEBUG`, and so does `systemd`.
+
 `init_environment()`
 --------------------
 
@@ -109,6 +116,7 @@ This function should always be ran at the top of any scripts. Once this function
 * `MAX_BODY_SIZE`
 * `MAX_HEADERS_SIZE`
 * `REQUEST_FULL_STRING`
+* `DEBUG_LOG`
 
 To do so, it will read from the standard input the received request, and execute `read_request` to initialize everything.
 
@@ -124,6 +132,8 @@ Public: Log any messages in the error outut of the script (default is console).
 
 Takes as many arguments as needed. they will all be written, separated by newlines.
 
+Use it for what is worth keeping on a busy server: errors, and the one line per response written by `_send_header()`. Everything else belongs in `log_debug()`.
+
 Examples
 
      log "> HTTP/1.0 200 OK
@@ -131,6 +141,20 @@ Examples
 will output
 
      > HTTP/1.0 200 OK
+
+
+`log_debug()`
+-------------
+
+Public: Same as `log()`, but only when debug logging is on.
+
+Debug logging is off unless `SHERVER_DEBUG` is `1` in the environment, which `sherver.sh --debug` does. It turns on the full request and response dumps, which are a dozen lines per request: enough to hit the rate limit of a log collector.
+
+Takes as many arguments as needed. they will all be written, separated by newlines.
+
+Examples
+
+     log_debug "> Content-Type: text/html"
 
 
 `_check_encoding()`
@@ -439,6 +463,6 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 
-* $1 - if true, logs will be written (whole header, but not the body)
+* $1 - true when parsing from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so that a request is not dumped once per script it goes through
 
 

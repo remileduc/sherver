@@ -57,7 +57,8 @@ Presentation
 
 ### How to run ###
 
-Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` (default is `8080`).
+Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` (default is `8080`), and
+`--debug` before it to get verbose logs: `./sherver.sh --debug 8080`.
 
 ### Requirements ###
 
@@ -275,7 +276,8 @@ All variables and functions mentioned here have a full description in [scripts/R
 
 ### Logs ###
 
-Anything written to the standard error can be logged. To ease the logs, you can use the function `log`.
+Anything written to the standard error can be logged. To ease the logs, you can use the functions
+`log` and `log_debug`.
 
 To keep the logs in a file, you can redirect the error output of *sherver.sh* in a file:
 
@@ -283,7 +285,29 @@ To keep the logs in a file, you can redirect the error output of *sherver.sh* in
 ./sherver.sh 2> logs.txt
 ```
 
-By default, the headers of both the requests and the responses are logged, but not the bodies.
+By default, a served request is one line, and an error adds the reason it failed:
+
+```
+GET /file/venise.webp 200
+NOT FOUND: realpath - 'nope.sh'
+GET /nope.sh 404
+```
+
+Passing `--debug` adds the headers of both the requests and the responses (never the bodies):
+
+```bash
+./sherver.sh --debug 8080
+```
+
+The flag exports `SHERVER_DEBUG=1`, which is what the scripts actually read, so the service can turn
+it on with `systemctl edit sherver.service` and an `Environment=SHERVER_DEBUG=1` line. Use `log_debug`
+in your own scripts for anything you only want under that flag.
+
+When running as a service, the logs go to the journal:
+
+```bash
+journalctl -u sherver.service -f
+```
 
 ### Dispatcher ###
 

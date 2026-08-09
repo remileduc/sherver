@@ -39,6 +39,7 @@ declare -g REQUEST_FULL_STRING=''
 # * `MAX_BODY_SIZE`
 # * `MAX_HEADERS_SIZE`
 # * `REQUEST_FULL_STRING`
+# * `DEBUG_LOG`
 #
 # To do so, it will read from the standard input the received request, and execute
 # `read_request` to initialize everything.
@@ -118,11 +119,16 @@ function init_environment()
 	declare -rg MAX_HEADERS_SIZE=$((8 * 1024))
 	# Internal: canonical path computed by `_resolve_path()`
 	declare -g RESOLVED_PATH=''
+	# Public: `true` when verbose logging is on, see `log_debug()`
+	#
+	# Read from the environment because that is the only channel that survives the exec into
+	# a child script: `sherver.sh --debug` exports `SHERVER_DEBUG`, and so does `systemd`.
+	declare -rg DEBUG_LOG="${SHERVER_DEBUG:-0}"
 
 	# if REQUEST_FULL_STRING is empty, we fill it with the input stream and we export it
 	if [ -z "$REQUEST_FULL_STRING" ]; then
 		read_request true
-		log
+		log_debug
 		export REQUEST_FULL_STRING
 	else
 		read_request false <<< "$REQUEST_FULL_STRING"
@@ -133,6 +139,9 @@ export -f init_environment
 # Public: Log any messages in the error outut of the script (default is console).
 #
 # Takes as many arguments as needed. they will all be written, separated by newlines.
+#
+# Use it for what is worth keeping on a busy server: errors, and the one line per
+# response written by `_send_header()`. Everything else belongs in `log_debug()`.
 #
 # Examples
 #
@@ -146,6 +155,25 @@ function log()
 	printf '%s\n' "$*" >&2
 }
 export -f log
+
+# Public: Same as `log()`, but only when debug logging is on.
+#
+# Debug logging is off unless `SHERVER_DEBUG` is `1` in the environment, which
+# `sherver.sh --debug` does. It turns on the full request and response dumps, which are
+# a dozen lines per request: enough to hit the rate limit of a log collector.
+#
+# Takes as many arguments as needed. they will all be written, separated by newlines.
+#
+# Examples
+#
+#    log_debug "> Content-Type: text/html"
+function log_debug()
+{
+	if [ "$DEBUG_LOG" = 1 ]; then
+		printf '%s\n' "$*" >&2
+	fi
+}
+export -f log_debug
 
 # Internal: Tell if the given string is properly percent encoded.
 #
@@ -337,8 +365,11 @@ export -f add_header
 #    Expires: Thu, 04 Jul 2019 21:38:23 GMT
 function _send_header()
 {
+	# the access log: the only line a quiet server writes for a request it served. A request
+	# too broken to have a method is answered before those variables are filled
+	log "${REQUEST_METHOD:--} ${REQUEST_URL:--} $1"
 	# HTTP header
-	log "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
+	log_debug "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
 	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a
 	# real CRLF and inject a header of its own
 	printf 'HTTP/1.0 %s %s\r\n' "$1" "${HTTP_RESPONSE[$1]}"
@@ -351,7 +382,7 @@ function _send_header()
 	# rest of the headers
 	local i
 	for i in "${!RESPONSE_HEADERS[@]}"; do
-		log "> $i: ${RESPONSE_HEADERS[$i]}"
+		log_debug "> $i: ${RESPONSE_HEADERS[$i]}"
 		printf '%s: %s\r\n' "$i" "${RESPONSE_HEADERS[$i]}"
 	done
 	printf '\r\n'
@@ -414,7 +445,7 @@ function send_response()
 			printf '%s\n' "$i"
 		done
 	fi
-	log '================================================'
+	log_debug '================================================'
 	exit 0
 }
 export -f send_response
@@ -435,7 +466,8 @@ export -f send_response
 #    HTTP/1.0 404 Not Found
 function send_error()
 {
-	log "ERROR $1"
+	# the access log already carries the code, so this one is only useful next to a dump
+	log_debug "ERROR $1"
 	local html
 	html=$(cat <<EOF
 		<!DOCTYPE html>
@@ -681,7 +713,7 @@ function send_file()
 		if [ "$REQUEST_METHOD" != 'HEAD' ]; then
 			cat "$file"
 		fi
-		log '================================================'
+		log_debug '================================================'
 	fi
 	exit 0
 }
@@ -744,7 +776,9 @@ export -f run_script
 #
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 #
-# $1 - if true, logs will be written (whole header, but not the body)
+# $1 - true when parsing from the standard input, false when re-parsing
+#      `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so
+#      that a request is not dumped once per script it goes through
 function read_request()
 {
 	local line
@@ -809,7 +843,7 @@ $line"
 		REQUEST_HEADERS["${key,,}"]="$value"
 	done
 	if [ "$1" = true ]; then
-		log "$REQUEST_FULL_STRING"
+		log_debug "$REQUEST_FULL_STRING"
 	fi
 
 	# fill REQUEST_BODY if POST
