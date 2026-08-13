@@ -36,7 +36,7 @@ function setup_file()
 				export SHERVER_PORT="$port" SHERVER_PID="$pid"
 				return 0
 			fi
-			# the shell is still there as long as socat holds the port
+			# socat exits when the port is taken: stop polling and try the next one
 			kill -0 "$pid" 2> /dev/null || break
 			sleep 0.1
 		done
@@ -47,12 +47,14 @@ function setup_file()
 
 # Internal: Stop the server.
 #
-# `sherver.sh` waits on a socat it started in the background, so killing the shell
-# leaves the listener behind: the port itself is what identifies it.
+# `sherver.sh` execs socat, so the PID from `setup_file` is the listener itself.
+# Unset means nothing started — and a `kill 0` fallback would signal the whole
+# process group, bats included.
 function teardown_file()
 {
-	kill "${SHERVER_PID:-0}" 2> /dev/null || true
-	pkill -f "TCP4-LISTEN:${SHERVER_PORT:-0}," 2> /dev/null || true
+	if [ -n "${SHERVER_PID:-}" ]; then
+		kill "$SHERVER_PID" 2> /dev/null || true
+	fi
 }
 
 @test "a real client is answered" {

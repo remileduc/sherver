@@ -152,7 +152,7 @@ export -f init_environment
 #    > HTTP/1.0 200 OK
 function log()
 {
-	printf '%s\n' "$*" >&2
+	printf '%s\n' "$@" >&2
 }
 export -f log
 
@@ -170,7 +170,7 @@ export -f log
 function log_debug()
 {
 	if [ "$DEBUG_LOG" = 1 ]; then
-		printf '%s\n' "$*" >&2
+		printf '%s\n' "$@" >&2
 	fi
 }
 export -f log_debug
@@ -271,6 +271,7 @@ function parse_url()
 	local -a fields
 	IFS='&' read -ra fields <<< "$parameters"
 	# now we fill URL_PARAMETERS
+	# keep in sync with the twin loop in `read_request`, which decodes an urlencoded body
 	local key value
 	local -i i
 	for (( i=0; i < ${#fields[@]}; i++ )); do
@@ -747,7 +748,8 @@ export -f send_file
 function run_script()
 {
 	cd 'scripts'
-	parse_url "${1:-$REQUEST_URL}"
+	local -r url="${1:-$REQUEST_URL}"
+	parse_url "$url"
 	_resolve_path 'scripts' "${URL_BASE:1}"
 	local -r script="$RESOLVED_PATH"
 	# existence is already guaranteed by `_resolve_path`
@@ -755,7 +757,7 @@ function run_script()
 		send_error 404
 	fi
 
-	"$script" "${1:-$REQUEST_URL}" || send_error 500
+	"$script" "$url" || send_error 500
 }
 export -f run_script
 
@@ -783,6 +785,7 @@ function read_request()
 {
 	local line
 	if ! read -r line; then
+		log 'BAD REQUEST: empty request'
 		send_error 400
 	fi
 	# checked before we touch the string: `send_error` runs `cat`, which fails just the same
@@ -798,8 +801,9 @@ function read_request()
 	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
 	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] || [ -z "$REQUEST_HTTP_VERSION" ]; then
 		if [ "$1" = true ]; then
-			log "$REQUEST_FULL_STRING"
+			log_debug "$REQUEST_FULL_STRING"
 		fi
+		log 'BAD REQUEST: malformed request line'
 		send_error 400
 	fi
 	# Only GET, HEAD and POST are supported at this time
@@ -807,7 +811,7 @@ function read_request()
 		GET|HEAD|POST) ;;
 		*)
 			if [ "$1" = true ]; then
-				log "$REQUEST_FULL_STRING"
+				log_debug "$REQUEST_FULL_STRING"
 			fi
 			send_error 405
 			;;
@@ -815,7 +819,7 @@ function read_request()
 	# `parse_url` decodes the URL, so a broken encoding can't be answered
 	if ! _check_encoding "$REQUEST_URL"; then
 		if [ "$1" = true ]; then
-			log "$REQUEST_FULL_STRING"
+			log_debug "$REQUEST_FULL_STRING"
 		fi
 		log "BAD REQUEST: invalid percent encoding in '$REQUEST_URL'"
 		send_error 400
@@ -839,6 +843,11 @@ function read_request()
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 $line"
 		IFS=$': \t' read -r key value <<< "$line"
+		# an empty name is a fatal `bad array subscript`, and only a broken client sends one
+		if [ -z "$key" ]; then
+			log 'BAD REQUEST: header line without a name'
+			send_error 400
+		fi
 		# header names are case insensitive, so we normalize them to lowercase
 		REQUEST_HEADERS["${key,,}"]="$value"
 	done
@@ -880,6 +889,7 @@ $line"
 				log 'BAD REQUEST: invalid percent encoding in the body'
 				send_error 400
 			fi
+			# keep in sync with the twin loop in `parse_url`, which decodes the query string
 			local -a fields
 			IFS='&' read -ra fields <<< "$REQUEST_BODY"
 			local key value

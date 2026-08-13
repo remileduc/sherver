@@ -212,8 +212,9 @@ send_response 200 "$REQUEST_FULL_STRING"
 If you don't use Bash, you will only have access to the environment variable `REQUEST_FULL_STRING` that
 contains the full request as a string. The requested URL (`REQUEST_URL`) will be passed as first argument.
 
-Everything written on the standart output will be sent to the client. Though, you should write the
-headers of the response yourself.
+Everything written on the standard output will be sent to the client. Though, you should write the
+headers of the response yourself. That includes handling `HEAD` requests: the method is the first word
+of `REQUEST_FULL_STRING`, and a `HEAD` answer must carry the headers only, no body.
 
 ### Template mechanism ###
 
@@ -258,7 +259,8 @@ Full HTML example in [Example](#example) below.
 
 Post requests are supported. You can check the value of the variable `REQUEST_METHOD` that will be
 `GET`, `HEAD` or `POST`, so you can have different behavior based on the type of the request. A `HEAD` is a
-`GET` whose answer carries no body: the send functions drop it for you, so treat it like a `GET`.
+`GET` whose answer carries no body: the send functions drop it for you, so treat it like a `GET`. If you
+write the response yourself instead of using them, dropping the body is on you.
 
 The content of the POST request can be retrieved in the variable `REQUEST_BODY`. If the client sent
 `application/x-www-form-urlencoded` content, the parameters are also parsed for you in the associative

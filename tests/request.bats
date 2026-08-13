@@ -115,6 +115,14 @@ a b' ]
 	[ "$(status_code)" = '400' ]
 }
 
+@test "a header line without a name is a 400, not a crash" {
+	local header
+	for header in ': naughty' ':naughty' $'\t: naughty'; do
+		request '' 'GET / HTTP/1.0' "$header"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
 @test "a URL that is not decodable is a 400" {
 	local url
 	for url in '/index.sh?a=%zz' '/%2' '/file/100%' '/index.sh?a=%00'; do
