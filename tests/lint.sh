@@ -192,7 +192,7 @@ function check_exports()
 	return "$status"
 }
 
-# Internal: Every library function needs a TomDoc block, as `scripts/README.md` is
+# Internal: Every library function needs a TomDoc block, as `docs/functions.md` is
 # generated from them.
 function check_tomdoc()
 {
@@ -255,8 +255,9 @@ function check_executable_bits()
 	report 'wrong permissions:' "${wrong[@]}"
 }
 
-# Internal: `scripts/README.md` is generated from the TomDoc comments of the library.
-function check_generated_readme()
+# Internal: `docs/functions.md` is entirely generated from the TomDoc comments of the
+# library, so it must match a fresh run byte for byte.
+function check_generated_docs()
 {
 	if [ ! -x './tomdoc.sh' ]; then
 		echo 'tomdoc.sh is not in the repository root, see scripts/README.md'
@@ -265,13 +266,11 @@ function check_generated_readme()
 	local generated
 	generated=$(mktemp)
 	./tomdoc.sh --markdown "$LIBRARY" > "$generated"
-	# the committed file opens with a hand written preamble, so only its tail is generated
-	local -i lines status=0
-	lines=$(wc -l < "$generated")
-	tail -n "$lines" 'scripts/README.md' | diff - "$generated" || status=$?
+	local -i status=0
+	diff 'docs/functions.md' "$generated" || status=$?
 	rm -f "$generated"
 	if [ "$status" -ne 0 ]; then
-		echo "run './tomdoc.sh --markdown scripts/SHERVER_UTILS.sh' and update scripts/README.md"
+		echo "run './tomdoc.sh --markdown scripts/SHERVER_UTILS.sh > docs/functions.md'"
 	fi
 	return "$status"
 }
@@ -288,7 +287,7 @@ check 'library exports'               check_exports
 check 'library TomDoc comments'       check_tomdoc
 check 'HTTP error codes'              check_error_codes
 check 'executable bits'               check_executable_bits
-check 'generated scripts/README.md'   check_generated_readme
+check 'generated docs/functions.md'   check_generated_docs
 
 if [ "$FAILURES" -ne 0 ]; then
 	printf '\n%s check(s) failed\n' "$FAILURES"

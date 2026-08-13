@@ -70,6 +70,9 @@ This is made to run with `Bash`. It may not work in another shell. The following
 - optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base`)
 - for development: `bats` and `shellcheck` for the tests.
 
+[docs/call-graph.md#external-commands](./docs/call-graph.md#external-commands) lists which function calls which of
+these tools.
+
 ### Features ###
 
 Sherver is a web server that implements part of HTTP 1.0. Even if it is written in a few lines of Bash, it is able to do a lot:
@@ -104,8 +107,9 @@ This is why Sherver is supposed to remain in a private and controlled environmen
 How to use
 ----------
 
-Quick documentation about how to use Sherver for your own use. All variables and functions mentioned here have a full
-description in [scripts/README.md](./scripts/README.md).
+Quick documentation about how to use Sherver for your own use. All variables mentioned here have a full description
+in [docs/global-variables.md](./docs/global-variables.md), the functions in [docs/functions.md](./docs/functions.md),
+and a map of who calls what is in [docs/call-graph.md](./docs/call-graph.md).
 
 Note that the 2 important folders `file` and `scripts` can be symlink, but files inside can't.
 
@@ -190,7 +194,8 @@ And also a lot of useful functions like:
 - `send_file`
 - `send_error`
 
-Check the whole documentation about the `SHERVER_UTILS.sh` library in [scripts/README.md](./scripts/README.md).
+Check the whole documentation about the `SHERVER_UTILS.sh` library in [docs/functions.md](./docs/functions.md) and
+[docs/global-variables.md](./docs/global-variables.md).
 
 Everything written on the standard output will be sent to the client. Here is a very simple script that returns
 the requests in a text format:
@@ -275,7 +280,8 @@ Any content can be sent back to the client. You can add the correct mime type th
 How to use (Expert)
 -------------------
 
-All variables and functions mentioned here have a full description in [scripts/README.md](./scripts/README.md).
+All variables mentioned here have a full description in [docs/global-variables.md](./docs/global-variables.md), and
+the functions in [docs/functions.md](./docs/functions.md).
 
 ### Logs ###
 
