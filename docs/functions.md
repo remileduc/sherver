@@ -327,6 +327,10 @@ Takes the path to the file to send as a parameter.
 
 It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, or if the file is outside of `file/`, send a 404 error.
 
+Every answer carries two cache validators: an `ETag` built from the size and mtime of the file, and its `Last-Modified` date. A conditional request that matches one of them (`If-None-Match` first, `If-Modified-Since` only when no usable ETag was sent) is answered with a bodyless `304 Not Modified`. An `If-None-Match` of `*` matches too.
+
+Only a GET or a HEAD is answered that way: a 304 to a POST would leave the client without a representation of what it just sent.
+
 The path generally comes from the URL (`URL_BASE`). You just need to remove the first `/` to get a relative path.
 
 *Note* that to find the correct mimetype, we use `_get_mimetype()`, which deduces it from the extension of the file.

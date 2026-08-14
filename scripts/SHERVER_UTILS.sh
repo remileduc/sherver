@@ -745,6 +745,14 @@ export -f _get_mimetype
 # of the file, with the correct mime type and all. If the file doesn't exist, or
 # if the file is outside of `file/`, send a 404 error.
 #
+# Every answer carries two cache validators: an `ETag` built from the size and mtime
+# of the file, and its `Last-Modified` date. A conditional request that matches one
+# of them (`If-None-Match` first, `If-Modified-Since` only when no usable ETag was sent)
+# is answered with a bodyless `304 Not Modified`. An `If-None-Match` of `*` matches too.
+#
+# Only a GET or a HEAD is answered that way: a 304 to a POST would leave the client
+# without a representation of what it just sent.
+#
 # The path generally comes from the URL (`URL_BASE`). You just need to remove the first
 # `/` to get a relative path.
 #
@@ -772,27 +780,53 @@ function send_file()
 		send_error 404
 	fi
 
-	# we create an ETag
-	local etag
-	etag="\"$(stat -c '%s-%Y' "$file")\""
-	add_header 'ETag' "$etag"
-	# if client already cached it, we don't resend it
-	if [ -v "REQUEST_HEADERS['if-none-match']" ] && [ "${REQUEST_HEADERS['if-none-match']}" = "$etag" ]; then
-		send_response 304
-	else
-		# HTTP header
-		local content_type content_length
-		content_type=$(_get_mimetype "$file")
-		content_length=$(stat -c '%s' "$file")
-		add_header 'Content-Type'   "$content_type";
-		add_header 'Content-Length' "$content_length"
-		_send_header 200
-		# response
-		if [ "$REQUEST_METHOD" != 'HEAD' ]; then
-			cat "$file"
-		fi
-		log_debug '================================================'
+	# one `stat` for the three headers below: read twice, it can straddle a file being
+	# replaced and pair the size of one version with the validators of another. Assigned
+	# through `if`, because a plain assignment returns the failure to `set -e`, which would
+	# abort the dispatcher here — before `_send_header`, so the client would get zero bytes
+	local stats
+	if ! stats=$(stat -c '%s %Y' "$file" 2>/dev/null); then
+		log "NOT FOUND: stat - '$file' went away while it was being answered"
+		send_error 404
 	fi
+	local -r size="${stats% *}" mtime="${stats#* }"
+	# two cache validators: ETag for the HTTP/1.1 clients, Last-Modified for the HTTP/1.0
+	# ones — `wget -N` works off the latter alone. Set before the checks, so a 304 has both
+	local -r etag="\"$size-$mtime\""
+	# the bash builtin gives the same string as `date -uR -r` without the fork, and without
+	# a `date` that knows `-r` to depend on. Both prefixes matter: `LC_ALL` keeps the day
+	# and month abbreviations English, which is what RFC 7231 asks for
+	local last_modified
+	TZ=UTC0 LC_ALL=C printf -v last_modified '%(%a, %d %b %Y %H:%M:%S)T GMT' "$mtime"
+	add_header 'ETag' "$etag"
+	add_header 'Last-Modified' "$last_modified"
+	# if client already cached it, we don't resend it. When both validators come in,
+	# If-None-Match alone decides (RFC 7232): a stale date must not override the ETag.
+	# Exact string match for both: a client we can't recognize just gets the full answer.
+	# GET and HEAD only: a 304 answers a POST with no representation for what it just sent
+	if [ "$REQUEST_METHOD" != 'POST' ]; then
+		# an empty value is no validator at all: it must not swallow the date below
+		local -r if_none_match="${REQUEST_HEADERS['if-none-match']:-}"
+		if [ -n "$if_none_match" ]; then
+			# `*` is the RFC 7232 wildcard: it matches the file whatever our ETag is
+			if [ "$if_none_match" = "$etag" ] || [ "$if_none_match" = '*' ]; then
+				send_response 304
+			fi
+		elif [ "${REQUEST_HEADERS['if-modified-since']:-}" = "$last_modified" ]; then
+			send_response 304
+		fi
+	fi
+	# HTTP header
+	local content_type
+	content_type=$(_get_mimetype "$file")
+	add_header 'Content-Type'   "$content_type";
+	add_header 'Content-Length' "$size"
+	_send_header 200
+	# response
+	if [ "$REQUEST_METHOD" != 'HEAD' ]; then
+		cat "$file"
+	fi
+	log_debug '================================================'
 	exit 0
 }
 export -f send_file

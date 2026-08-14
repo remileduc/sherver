@@ -141,7 +141,7 @@ External commands
 | ---------- | ------------------------------------------------------------ |
 | `socat`    | `sherver.sh`                                                 |
 | `realpath` | `init_environment` (`SHERVER_ROOT`), `_resolve_path`         |
-| `stat`     | `send_file` (ETag, `Content-Length`)                         |
+| `stat`     | `send_file` (ETag, `Last-Modified`, `Content-Length`)        |
 | `date`     | `_send_header`                                               |
 | `cat`      | `send_file` (body), heredocs in `send_error` and `index.sh`  |
 | `envsubst` | `index.sh`                                                   |

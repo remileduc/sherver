@@ -77,6 +77,72 @@ load 'test_helper'
 	[ -n "$(body)" ]
 }
 
+@test "a file answers with its Last-Modified date" {
+	request '' 'GET /file/venise.webp HTTP/1.0'
+	local expected
+	expected="$(date -uR -r "$REPO_ROOT/file/venise.webp")"
+	[ "$(header Last-Modified)" = "${expected/%+0000/GMT}" ]
+}
+
+@test "a matching If-Modified-Since is answered with a bodyless 304" {
+	request '' 'GET /file/venise.webp HTTP/1.0'
+	local -r date="$(header Last-Modified)"
+
+	request '' 'GET /file/venise.webp HTTP/1.0' "If-Modified-Since: $date"
+	[ "$(status_code)" = '304' ]
+	[ -z "$(body)" ]
+}
+
+@test "an If-Modified-Since that is not ours gets the file again" {
+	# the comparison is an exact string match, like the ETag one
+	request '' 'GET /file/venise.webp HTTP/1.0' 'If-Modified-Since: Thu, 04 Jul 2019 21:38:23 GMT'
+	[ "$(status_code)" = '200' ]
+	[ -n "$(body)" ]
+}
+
+@test "If-None-Match alone decides when both validators are sent" {
+	request '' 'GET /file/venise.webp HTTP/1.0'
+	local -r etag="$(header ETag)"
+	local -r date="$(header Last-Modified)"
+
+	# a stale ETag must win over a matching date...
+	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match: "0-0"' "If-Modified-Since: $date"
+	[ "$(status_code)" = '200' ]
+	# ...and a matching ETag over a stale date
+	request '' 'GET /file/venise.webp HTTP/1.0' "If-None-Match: $etag" \
+		'If-Modified-Since: Thu, 04 Jul 2019 21:38:23 GMT'
+	[ "$(status_code)" = '304' ]
+}
+
+@test "an empty If-None-Match does not swallow the If-Modified-Since" {
+	request '' 'GET /file/venise.webp HTTP/1.0'
+	local -r date="$(header Last-Modified)"
+
+	# the header is there but holds no validator, so the date is what decides
+	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match:' "If-Modified-Since: $date"
+	[ "$(status_code)" = '304' ]
+	[ -z "$(body)" ]
+}
+
+@test "an If-None-Match of * matches whatever we would have sent" {
+	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match: *'
+	[ "$(status_code)" = '304' ]
+	[ -z "$(body)" ]
+}
+
+@test "a POST is never answered with a 304" {
+	request '' 'GET /file/venise.webp HTTP/1.0'
+	local -r etag="$(header ETag)"
+	local -r date="$(header Last-Modified)"
+
+	# conditional requests are defined for GET and HEAD: a 304 here would leave the
+	# client with no representation at all for the body it just sent
+	request '' 'POST /file/venise.webp HTTP/1.0' "If-None-Match: $etag" \
+		"If-Modified-Since: $date" 'Content-Length: 0'
+	[ "$(status_code)" = '200' ]
+	[ -n "$(body)" ]
+}
+
 @test "a missing file is a 404" {
 	request '' 'GET /file/nope.txt HTTP/1.0'
 	[ "$(status_code)" = '404' ]
