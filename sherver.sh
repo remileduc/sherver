@@ -25,18 +25,24 @@ if [ "${1:-}" = '--debug' ]; then
 	shift
 fi
 
+# Options for socat: everything a user may want to tune is one line here.
+declare -a socat_options
+# the listening port and IP stack — keep exactly one of these two lines
+# (ipv6only=0 makes the IPv6 socket answer IPv4 clients too; TCP4 doesn't know the option)
+#socat_options+=("TCP4-LISTEN:${1:-8080}")
+socat_options+=("TCP6-LISTEN:${1:-8080}" 'ipv6only=0')
+# ~6 connections a browser opens per user, times the number of simultaneous users
+socat_options+=('max-children=32')
+# connections blocked by `max-children` wait in this queue
+socat_options+=('backlog=32')
+# the server model itself, do not change: fork one dispatcher per connection, rebind
+# the port immediately on restart, close the socket fully when the dispatcher exits
+socat_options+=('reuseaddr' 'fork' 'end-close')
+
 printf 'Sherver started, listening on %s\n' "${1:-8080}" >&2
 
-# Chose only one version: IPV4 or IPV6
-
 # -T: drop a connection that goes silent, so a client can't pin a forked child forever
-# max-children: ~5 users times the 6 connections a browser opens. socat accepts past the cap and
-# waits for a free slot, so backlog is the room where those connections wait
 # exec: socat replaces us, so systemd tracks and signals it instead of a bash wrapper
-
-# IPV4
-#exec socat -T 10 TCP4-LISTEN:"${1:-8080}",reuseaddr,fork,max-children=32,backlog=32,end-close EXEC:'./dispatcher.sh'
-
-# IPV6
-# ipv6only=0 makes the same socket answer IPv4 clients too
-exec socat -T 10 TCP6-LISTEN:"${1:-8080}",reuseaddr,ipv6only=0,fork,max-children=32,backlog=32,end-close EXEC:'./dispatcher.sh'
+# IFS joins the array into socat's one comma-separated argument, and dies with the exec
+IFS=','
+exec socat -T 10 "${socat_options[*]}" EXEC:'./dispatcher.sh'
