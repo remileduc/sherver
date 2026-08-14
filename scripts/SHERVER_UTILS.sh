@@ -372,9 +372,10 @@ export -f add_header
 #    Expires: Thu, 04 Jul 2019 21:38:23 GMT
 function _send_header()
 {
-	# the access log: the only line a quiet server writes for a request it served. A request
-	# too broken to have a method is answered before those variables are filled
-	log "${REQUEST_METHOD:--} ${REQUEST_URL:--} $1"
+	# the access log: the only line a quiet server writes for a request it served. socat's
+	# EXEC sets the peer address; a `-` means no socat in front, like the filter-driven
+	# tests. A request too broken to have a method is answered before those variables are filled
+	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${REQUEST_URL:--} $1"
 	# HTTP header
 	log_debug "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
 	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a

@@ -37,12 +37,14 @@ function setup_file()
 
 	local -i port
 	for (( port = 18080; port < 18120; port++ )); do
-		( cd -- "$REPO_ROOT" && exec ./sherver.sh "$port" ) > /dev/null 2>&1 &
+		# stderr goes to a file: it is the log, and the access-line test reads it
+		( cd -- "$REPO_ROOT" && exec ./sherver.sh "$port" ) > /dev/null 2> "$BATS_FILE_TMPDIR/server.log" &
 		local -i pid=$!
 		local -i try
 		for (( try = 0; try < 50; try++ )); do
 			if curl -ks -o /dev/null --max-time 2 "$scheme://localhost:$port/"; then
 				export SHERVER_URL="$scheme://localhost:$port" SHERVER_PORT="$port" SHERVER_PID="$pid"
+				export SHERVER_LOG="$BATS_FILE_TMPDIR/server.log"
 				return 0
 			fi
 			# socat exits when the port is taken: stop polling and try the next one
@@ -78,6 +80,14 @@ function teardown_file()
 	[ -n "$SHERVER_PORT" ]
 	run curl -ks -o /dev/null -w '%{http_code}' "$SHERVER_URL/index.sh"
 	[ "$output" = '200' ]
+}
+
+@test "the access line names the client address" {
+	run curl -ks -o /dev/null "$SHERVER_URL/index.sh?from=access-log-test"
+	[ "$status" -eq 0 ]
+	# the exact spelling is socat's (it prints IPv6 expanded and bracketed), so only
+	# assert an address took the place of the `-` the filter-driven suites get
+	grep -qE '^[^- ][^ ]* GET /index\.sh\?from=access-log-test 200$' "$SHERVER_LOG"
 }
 
 @test "a binary file survives the socket" {

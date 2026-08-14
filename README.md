@@ -306,10 +306,17 @@ To keep the logs in a file, you can redirect the error output of *sherver.sh* in
 By default, a served request is one line, and an error adds the reason it failed:
 
 ```
-GET /file/venise.webp 200
+::ffff:192.0.2.7 GET /file/venise.webp 200
 NOT FOUND: realpath - 'nope.sh'
-GET /nope.sh 404
+::ffff:192.0.2.7 GET /nope.sh 404
 ```
+
+The four fields are the client address, the method, the URL and the status code. The address comes
+from `SOCAT_PEERADDR`, which *socat* sets for every connection and the scripts inherit: it is
+spelled the way *socat* spells it (an IPv4 client of an IPv6 listener shows up as `::ffff:` like
+above), and it is a `-` when there is no *socat* in front, as when *dispatcher.sh* is driven by hand
+as a filter. A request too broken to have a method logs a `-` in its place too, so the field count
+never changes.
 
 Passing `--debug` adds the headers of both the requests and the responses (never the bodies):
 

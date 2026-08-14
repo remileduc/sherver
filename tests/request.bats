@@ -195,6 +195,20 @@ X-MiXeD-CaSe: yes' \
 	[ "$(header Content-Length)" = "$(body | wc -c)" ]
 }
 
+# ------------------------------------------------------------------- logging
+
+@test "a served request logs exactly one access line" {
+	request '' 'GET /index.sh?a=1 HTTP/1.0'
+	# the address is socat's; driven as a filter there is none, hence the `-`
+	[ "$(log_output)" = '- GET /index.sh?a=1 200' ]
+}
+
+@test "an error logs its reason next to the access line" {
+	request '' 'GET /nope.sh HTTP/1.0'
+	[[ "$(log_output)" == *'NOT FOUND'* ]]
+	[[ "$(log_output)" == *'- GET /nope.sh 404'* ]]
+}
+
 @test "index.sh escapes what the client sent instead of reflecting it" {
 	request '' 'GET /index.sh?%3Cscript%3E=%3Cimg+onerror%3Dalert(1)%3E HTTP/1.0' \
 		'X-Evil: <script>alert(2)</script>'
