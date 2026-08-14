@@ -202,6 +202,7 @@ And also a lot of useful functions like:
 - `send_response`
 - `send_file`
 - `send_error`
+- `send_redirect`
 
 Check the whole documentation about the `SHERVER_UTILS.sh` library in [docs/functions.md](./docs/functions.md) and
 [docs/global-variables.md](./docs/global-variables.md).

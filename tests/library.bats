@@ -141,6 +141,53 @@ ko %g0' ]
 	[[ $output != *'Content-Length'* ]]
 }
 
+# ------------------------------------------------------------- send_redirect
+
+@test "send_redirect answers a 302 with the Location and no body" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' 'send_redirect "/index.sh?a=1"'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.0 302 Found'* ]]
+	[[ $output == *'Location: /index.sh?a=1'* ]]
+	[[ $output == *'Content-Length: 0'* ]]
+}
+
+@test "send_redirect sends a 301 when asked to" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' 'send_redirect "/here" 301'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.0 301 Moved Permanently'* ]]
+}
+
+@test "send_redirect refuses a code that is not a redirect" {
+	# an unknown code would kill send_response mid-answer, leaving the client nothing
+	run --separate-stderr with_request 'GET / HTTP/1.0' 'send_redirect "/here" 404'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.0 500'* ]]
+	[[ $stderr == *'MISCONFIGURED'* ]]
+}
+
+@test "send_redirect without a target is a 500, not a dead connection" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' 'send_redirect'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.0 500'* ]]
+}
+
+@test "a target holding a CRLF cannot inject a header of its own" {
+	# what '?next=/ok%0d%0aSet-Cookie:+pwn%3D1' decodes to, handed over by a script
+	run --separate-stderr with_request 'GET / HTTP/1.0' \
+		"send_redirect \$'/ok\r\nSet-Cookie: pwn=1'"
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.0 500'* ]]
+	[[ $output != *'Set-Cookie'* ]]
+	[[ $stderr == *'MISCONFIGURED'* ]]
+}
+
+@test "a target holding a bare LF is refused too" {
+	run --separate-stderr with_request 'GET / HTTP/1.0' "send_redirect \$'/ok\nEvil: yes'"
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.0 500'* ]]
+	[[ $output != *'Evil:'* ]]
+}
+
 # ------------------------------------------------------------- _get_mimetype
 
 @test "_get_mimetype matches the extension whatever its case" {

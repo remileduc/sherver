@@ -51,6 +51,7 @@ flowchart TD
         send_response["send_response (exit)"]
         send_file["send_file (exit)"]
         send_error["send_error (exit)"]
+        send_redirect["send_redirect (exit)"]
         run_script
     end
 
@@ -88,6 +89,8 @@ flowchart TD
     send_file --> send_error
     resolve_path --> send_error
     send_error --> send_response
+    send_redirect --> send_response
+    send_redirect --> send_error
     send_response --> send_header
 ```
 
@@ -104,6 +107,7 @@ The same edges as a table, with the process boundaries spelled out:
 | `send_file`        | `_resolve_path`, `_get_mimetype`, `send_response`, `_send_header`, `send_error` |
 | `_resolve_path`    | `send_error`                                                                    |
 | `send_error`       | `send_response`                                                                 |
+| `send_redirect`    | `send_response`, `send_error`                                                   |
 | `send_response`    | `_send_header`                                                                  |
 | `scripts/index.sh` | `init_environment`, `html_escape`, `send_response`, `send_error`                |
 | `scripts/page.sh`  | `init_environment`, `send_error`, `send_file`                                   |
@@ -126,6 +130,7 @@ Which function sends which code through `send_error`:
 | `_resolve_path`    | 404, 500                | path missing or escaping the tree — never 403      |
 | `run_script`       | 404, 500                | endpoint not executable, or it exited non-zero     |
 | `send_file`        | 404                     | not a readable regular file                        |
+| `send_redirect`    | 500                     | no target, a CR or LF in it, or non-redirect code  |
 | `scripts/index.sh` | 405                     | method other than GET, HEAD or POST                |
 | `scripts/page.sh`  | 404, 405                | missing `page` parameter; method not GET or HEAD   |
 

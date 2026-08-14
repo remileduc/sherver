@@ -101,6 +101,8 @@ function init_environment()
 	# Public: Generic HTTP response code with their meaning (associative array)
 	declare -rAg HTTP_RESPONSE=(
 		[200]='OK'
+		[301]='Moved Permanently'
+		[302]='Found'
 		[304]='Not Modified'
 		[400]='Bad Request'
 		[403]='Forbidden'
@@ -497,6 +499,58 @@ EOF
 	send_response "$@" "$html"
 }
 export -f send_error
+
+# Public: Send a redirect to the given URL as an answer.
+#
+# Takes the target URL, and optionally the response code: 302 (the default) for a
+# temporary redirect, 301 for a permanent one — the two redirects HTTP 1.0 defines.
+# Anything else is refused with a 500: `send_response` would die expanding an unknown
+# code mid-answer, and the client would get nothing at all.
+#
+# The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form.
+#
+# A target holding a CR or a LF is refused with a 500 the same way: it would split the
+# Location header in two. The rest is the caller's business — a target built from the request
+# is an open redirect unless the script checks it, and a full URL is legitimate here, so the
+# library cannot tell the wanted ones from the others.
+#
+# Like the other `send_*` functions, it exits: nothing after it runs.
+#
+# $1 - the URL to redirect to (a path like `/index.sh`, or a full URL)
+# $2 - Optional: the response code, 301 or 302 (default 302)
+#
+# Examples
+#
+#    send_redirect '/index.sh'
+#
+# will send an answer that starts with
+#
+#    HTTP/1.0 302 Found
+#    Location: /index.sh
+function send_redirect()
+{
+	if [ -z "${1:-}" ]; then
+		log 'MISCONFIGURED: send_redirect needs a target URL'
+		send_error 500
+	fi
+	# `_url_decode` turns a `%0d%0a` the client sent into a real CRLF, which would close the
+	# Location header and let the rest of the target write headers, and a body, of its own
+	if [[ $1 == *[$'\r\n']* ]]; then
+		log 'MISCONFIGURED: send_redirect got a target holding a CR or a LF'
+		send_error 500
+	fi
+	local -r code="${2:-302}"
+	case "$code" in
+		301|302) ;;
+		*)
+			log "MISCONFIGURED: send_redirect got code '$code', which is not a redirect"
+			send_error 500
+			;;
+	esac
+	add_header 'Location' "$1"
+	send_response "$code"
+}
+export -f send_redirect
 
 # Internal: Resolve the given path and check that it stays in the authorized directory.
 #

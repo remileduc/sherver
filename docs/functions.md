@@ -243,6 +243,32 @@ will create an answer that starts with
      HTTP/1.0 404 Not Found
 
 
+`send_redirect()`
+-----------------
+
+Public: Send a redirect to the given URL as an answer.
+
+Takes the target URL, and optionally the response code: 302 (the default) for a temporary redirect, 301 for a permanent one — the two redirects HTTP 1.0 defines. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
+
+The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form.
+
+A target holding a CR or a LF is refused with a 500 the same way: it would split the Location header in two. The rest is the caller's business — a target built from the request is an open redirect unless the script checks it, and a full URL is legitimate here, so the library cannot tell the wanted ones from the others.
+
+Like the other `send_*` functions, it exits: nothing after it runs.
+
+* $1 - the URL to redirect to (a path like `/index.sh`, or a full URL)
+* $2 - Optional: the response code, 301 or 302 (default 302)
+
+Examples
+
+     send_redirect '/index.sh'
+
+will send an answer that starts with
+
+     HTTP/1.0 302 Found
+     Location: /index.sh
+
+
 `_resolve_path()`
 -----------------
 
