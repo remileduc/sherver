@@ -58,7 +58,13 @@ function init_environment()
 	#
 	# The dispatcher runs from the root, so we take the current directory. It is then
 	# inherited by the child scripts, which need it because `run_script` moves to `scripts/`.
-	declare -g SHERVER_ROOT="${SHERVER_ROOT:-$(realpath -e .)}"
+	#
+	# Assigned apart from `declare`, whose zero return would hide a `realpath` failure from
+	# `set -e` — the confinement check would then compare against `/file` and `/scripts`.
+	if [ -z "${SHERVER_ROOT:-}" ]; then
+		declare -g SHERVER_ROOT
+		SHERVER_ROOT=$(realpath .) || { log "FATAL: cannot canonicalize '$PWD'"; exit 1; }
+	fi
 	export SHERVER_ROOT
 	# Public: The method of the request (GET, HEAD, POST...)
 	declare -g REQUEST_METHOD=''
@@ -503,11 +509,11 @@ export -f send_error
 # exits on error: in a command substitution, the error page would be captured by the caller
 # instead of being sent to the client.
 #
-# Sends a 404 if the path doesn't exist or if it lands outside the authorized directory.
-# We purposely don't use 403 to avoid leak of the File System
+# Sends a 404 if the path is absolute, doesn't exist, or lands outside the authorized
+# directory. We purposely don't use 403 to avoid leak of the File System
 #
 # $1 - authorized directory, relative to `SHERVER_ROOT` (`file` or `scripts`)
-# $2 - path to resolve, relative to the current directory
+# $2 - path to resolve, relative to the current directory (an absolute path is refused)
 #
 # Examples
 #
@@ -519,9 +525,25 @@ export -f send_error
 function _resolve_path()
 {
 	local authorized
-	authorized=$(realpath -e -- "$SHERVER_ROOT/$1") || send_error 500
-	# `-e` requires every component to exist, so a missing file is a 404
-	if ! RESOLVED_PATH=$(realpath -e -- "$2" 2>/dev/null); then
+	if [[ ! -d $SHERVER_ROOT/$1 ]]; then
+		log "MISCONFIGURED: '$SHERVER_ROOT/$1' is not a directory"
+		send_error 500
+	fi
+	if ! authorized=$(realpath "$SHERVER_ROOT/$1"); then
+		log "MISCONFIGURED: realpath failed on '$SHERVER_ROOT/$1'"
+		send_error 500
+	fi
+	# the contract is a relative path: an absolute one only ever comes from a `//x` URL,
+	# which the `./` below would otherwise turn into a live alias of `/x`
+	if [[ $2 == /* ]]; then
+		log "FORBIDDEN: absolute path '$2'"
+		send_error 404
+	fi
+	# `./` because the URL can start with a dash and busybox realpath, having no options at
+	# all, has no `--` either to stop it being read as one
+	local -r target="./$2"
+	# and no `-e` either: busybox realpath happily resolves a missing last component
+	if [[ ! -e $target ]] || ! RESOLVED_PATH=$(realpath "$target" 2>/dev/null); then
 		log "NOT FOUND: realpath - '$2'"
 		send_error 404
 	fi

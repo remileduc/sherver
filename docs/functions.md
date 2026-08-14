@@ -254,10 +254,10 @@ Takes the authorized directory (relative to `SHERVER_ROOT`) and the path to reso
 
 The result is stored in `RESOLVED_PATH` instead of being echoed, because this function exits on error: in a command substitution, the error page would be captured by the caller instead of being sent to the client.
 
-Sends a 404 if the path doesn't exist or if it lands outside the authorized directory. We purposely don't use 403 to avoid leak of the File System
+Sends a 404 if the path is absolute, doesn't exist, or lands outside the authorized directory. We purposely don't use 403 to avoid leak of the File System
 
 * $1 - authorized directory, relative to `SHERVER_ROOT` (`file` or `scripts`)
-* $2 - path to resolve, relative to the current directory
+* $2 - path to resolve, relative to the current directory (an absolute path is refused)
 
 Examples
 

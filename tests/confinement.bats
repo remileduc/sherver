@@ -31,6 +31,22 @@ function refuses()
 	[[ "$(body)" != *"$REPO_ROOT"* ]]
 }
 
+# Internal: Check that the given URL is served with a 200.
+function serves()
+{
+	request '' "GET $1 HTTP/1.0"
+	[ "$(status_code)" = '200' ]
+}
+
+# The symlinks the tests below create are removed here rather than in the test bodies,
+# because bats stops a body at its first failing line and would leak them — `scripts/-e`
+# would then be a live endpoint on the real server.
+function teardown()
+{
+	rm -f "$REPO_ROOT/file/test-escape.txt" "$REPO_ROOT/file/test-inside.webp" \
+		"$REPO_ROOT/scripts/-e"
+}
+
 @test "a relative escape out of file/ is refused" {
 	refuses '/file/../dispatcher.sh'
 	refuses '/file/../scripts/SHERVER_UTILS.sh'
@@ -46,6 +62,9 @@ function refuses()
 
 @test "an absolute path is refused" {
 	refuses '//etc/passwd'
+	# the refusal must come from the deliberate branch, not from `./etc/passwd` happening
+	# not to exist under `scripts/`
+	[[ "$(log_output)" == *'FORBIDDEN: absolute path'* ]]
 	refuses '/file//etc/passwd'
 }
 
@@ -72,15 +91,17 @@ function refuses()
 	# the path is canonicalized, so the link is followed before the check
 	ln -sfn /etc/passwd "$REPO_ROOT/file/test-escape.txt"
 	refuses '/file/test-escape.txt'
-	rm -f "$REPO_ROOT/file/test-escape.txt"
 }
 
 @test "a symlink staying inside the tree is served" {
 	ln -sfn 'venise.webp' "$REPO_ROOT/file/test-inside.webp"
-	request '' 'GET /file/test-inside.webp HTTP/1.0'
-	local -r code="$(status_code)"
-	rm -f "$REPO_ROOT/file/test-inside.webp"
-	[ "$code" = '200' ]
+	serves '/file/test-inside.webp'
+}
+
+@test "a URL that looks like an option is still a path" {
+	# `realpath` is called bare, so `/-e` must reach it as `./-e` and not as a flag
+	ln -sfn 'index.sh' "$REPO_ROOT/scripts/-e"
+	serves '/-e'
 }
 
 @test "a template is not served as a script" {

@@ -66,12 +66,17 @@ Just clone and run `./sherver.sh`. Then, you should be able to connect to [local
 This is made to run with `Bash`. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
-- `date`, `realpath`, `stat` and `cat` that all come from `coreutils` 
-- optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base`)
+- `date`, `realpath`, `stat` and `cat` — from `coreutils` on a GNU system, but busybox's versions are enough (see below)
+- optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base` in Debian, or something like `gettext-envsubst` as a smaller package in Alpine)
 - for development: `bats` and `shellcheck` for the tests.
 
 [docs/call-graph.md#external-commands](./docs/call-graph.md#external-commands) lists which function calls which of
 these tools.
+
+On a busybox system such as an Alpine container, `coreutils` is not needed: `date -uR`, `stat -c` and
+`cat` are all covered by busybox, and `realpath` is called without any option precisely so that
+busybox's — which parses none — is enough. Only `bash`, `socat` and — because the default index page
+templates itself with it — `envsubst` have to come from packages.
 
 ### Features ###
 
