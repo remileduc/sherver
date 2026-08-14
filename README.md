@@ -60,7 +60,8 @@ Presentation
 ### How to run ###
 
 Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` (default is `8080`), and
-`--debug` before it to get verbose logs: `./sherver.sh --debug 8080`.
+`--debug` before it to get verbose logs: `./sherver.sh --debug 8080`. `./sherver.sh --version` prints the
+version and exits; [CHANGELOG.md](./CHANGELOG.md) says what each one brought.
 
 ### Requirements ###
 
@@ -69,7 +70,9 @@ This is made to run with `Bash`. It may not work in another shell. The following
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
 - `date`, `realpath`, `stat` and `cat` — from `coreutils` on a GNU system, but busybox's versions are enough (see below)
 - optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base` in Debian, or something like `gettext-envsubst` as a smaller package in Alpine)
-- for development: `bats` and `shellcheck` for the tests.
+- for development: `bats` and `shellcheck` for the tests. The two suites that open a port also want
+	`curl`, and the HTTPS one uses `openssl` to generate itself a throwaway certificate, falling back on
+	a committed one when there is no `openssl` around.
 
 [docs/call-graph.md#external-commands](./docs/call-graph.md#external-commands) lists which function calls which of
 these tools.

@@ -76,7 +76,7 @@ Comment the `TCP6-LISTEN` line and uncomment the three `OPENSSL-*` ones:
 #socat_options+=("TCP6-LISTEN:${1:-8080}" 'ipv6only=0')
 socat_options+=("OPENSSL-LISTEN:${1:-8080}" 'pf=ip6' 'ipv6only=0')
 socat_options+=("cert=$PWD/certs/cert.pem" "key=$PWD/certs/key.pem")
-socat_options+=('verify=0' 'min-proto-version=TLS1.3')
+socat_options+=('verify=0' 'openssl-min-proto-version=TLS1.3')
 ```
 
 What each option does:
@@ -86,9 +86,10 @@ What each option does:
   `reuseaddr`, `fork` and `end-close` are unchanged — they apply to the underlying TCP listener.
 - `verify=0` is **required**: socat's TLS listener demands a *client* certificate by default and
   drops browsers that don't present one. Leaving verification on is the mutual TLS setup below.
-- `min-proto-version=TLS1.3` refuses SSLv3 and TLS 1.0/1.1/1.2 outright. It also refuses anything
-  older than Android 10, iOS 12.2 or OpenSSL 1.1.1 — drop to `TLS1.2` if such a client must connect.
-  The option needs socat 1.7.4 or later.
+- `openssl-min-proto-version=TLS1.3` refuses SSLv3 and TLS 1.0/1.1/1.2 outright. It also refuses
+  anything older than Android 10, iOS 12.2 or OpenSSL 1.1.1 — drop to `TLS1.2` if such a client must
+  connect. The option needs socat 1.7.4 or later, under that full name: the short `min-proto-version`
+  is an alias socat only grew in 1.8.1, and 1.8.0 — what Ubuntu 24.04 ships — refuses to start on it.
 
 Restart, and the same port now talks HTTPS — plain `http://` requests to it will fail, there is no
 redirect (socat is one listener, not a web server).
@@ -99,10 +100,15 @@ certificate generated as root is unreadable by `User=sherver`. Then socat dies a
 `SSL_CTX_use_certificate_file()` and `Restart=always` loops on it, so `chown -R sherver:sherver certs`
 after generating.
 
-The test suite follows the configured mode on its own: `tests/server.bats` — the only suite that
-opens a port — reads the listening line from `sherver.sh` and talks TLS to it when the
-`OPENSSL-LISTEN` one is active (with `curl -k`: the certificate's names don't have to include
-`localhost`). The other suites drive the dispatcher directly and never see the socket.
+Two suites cover this. `tests/https.bats` starts a TLS listener with the options above and a
+certificate it generates in its own temporary directory, so the encrypted path is tested whatever
+this checkout is configured for; it is also what fails if the recipe above is edited without
+updating it. It only gives up when socat cannot speak TLS at all: without the `openssl` command it
+serves the committed `tests/localhost.pem` instead, and a socat too old for `min-proto-version`
+costs the one test that asserts TLS 1.2 is refused. `tests/server.bats` follows the configured mode instead: it reads the listening line
+from `sherver.sh` and talks TLS to it when the `OPENSSL-LISTEN` one is active (with `curl -k`, as
+your certificate's names need not include `localhost`). The other suites drive the dispatcher
+directly and never see a socket.
 
 Test it:
 
@@ -145,8 +151,8 @@ the `verify=0` line — socat ignores `cafile` as long as verification is off, s
 a listener that never asks for a client certificate:
 
 ```bash
-#socat_options+=('verify=0' 'min-proto-version=TLS1.3')
-socat_options+=("cafile=$PWD/certs/clients.pem" 'min-proto-version=TLS1.3')
+#socat_options+=('verify=0' 'openssl-min-proto-version=TLS1.3')
+socat_options+=("cafile=$PWD/certs/clients.pem" 'openssl-min-proto-version=TLS1.3')
 ```
 
 where `clients.pem` is the concatenation of the client certificates you accept. Browsers will

@@ -19,10 +19,17 @@ set -efu
 
 cd "$(dirname "$0")"
 
+declare -r SHERVER_VERSION='1.0'
+
 # the environment is the only thing the dispatcher and the scripts it runs inherit from us
 if [ "${1:-}" = '--debug' ]; then
 	export SHERVER_DEBUG=1
 	shift
+fi
+
+if [ "${1:-}" = '--version' ]; then
+	printf 'Sherver %s\n' "$SHERVER_VERSION"
+	exit 0
 fi
 
 # Options for socat: everything a user may want to tune is one line here.
@@ -35,7 +42,7 @@ socat_options+=("TCP6-LISTEN:${1:-8080}" 'ipv6only=0')
 # (pf=ip4 instead of pf=ip6,ipv6only=0 for IPv4 only; verify=0 = don't ask a *client* certificate)
 #socat_options+=("OPENSSL-LISTEN:${1:-8080}" 'pf=ip6' 'ipv6only=0')
 #socat_options+=("cert=$PWD/certs/cert.pem" "key=$PWD/certs/key.pem")
-#socat_options+=('verify=0' 'min-proto-version=TLS1.3')
+#socat_options+=('verify=0' 'openssl-min-proto-version=TLS1.3')
 # ~6 connections a browser opens per user, times the number of simultaneous users
 socat_options+=('max-children=32')
 # connections blocked by `max-children` wait in this queue
@@ -52,7 +59,7 @@ case "${socat_options[*]}" in
 		;;
 esac
 
-printf 'Sherver started, listening on %s\n' "${1:-8080}" >&2
+printf 'Sherver %s started, listening on %s\n' "$SHERVER_VERSION" "${1:-8080}" >&2
 
 # -T: drop a connection that goes silent, so a client can't pin a forked child forever
 # exec: socat replaces us, so systemd tracks and signals it instead of a bash wrapper

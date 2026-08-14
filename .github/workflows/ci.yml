@@ -45,7 +45,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bats socat gettext-base
           sudo apt-get clean
+          echo 'bats version:'
           bats --version
+          echo 'socat version:'
+          socat -V
 
       - name: Run tests
         run: bats --print-output-on-failure tests/
