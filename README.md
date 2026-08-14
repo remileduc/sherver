@@ -39,6 +39,7 @@ This is inspired by [bashttpd](https://github.com/avleen/bashttpd). Though, the 
 [How to use (Expert)](#how-to-use-expert)
 - [Logs](#logs)
 - [Dispatcher](#dispatcher)
+- [HTTPS](#https)
 - [Run as a service (daemon)](#run-as-a-service-daemon)
 	- [Sandboxing](#sandboxing)
 
@@ -338,6 +339,14 @@ It currently has 4 actions:
 
 All this behaviors can be changed by editing the file [dispatcher.sh](./dispatcher.sh).
 
+### HTTPS ###
+
+Sherver can serve over HTTPS, so a sniffer on the network only sees an encrypted stream. TLS is
+terminated by `socat` itself: generate a self-signed certificate, swap the `TCP6-LISTEN` line for
+the `OPENSSL-LISTEN` ones in [sherver.sh](./sherver.sh), and import the certificate on your
+devices. The whole procedure — and what it does *not* protect against — is in
+[docs/https.md](./docs/https.md).
+
 ### Run as a service (daemon) ###
 
 First of all, you need to create a specific user that will run `sherver.sh` with low priviledges.
@@ -415,9 +424,9 @@ About security
 See [bashttpd](https://github.com/avleen/bashttpd#security). It is obvious to say that this comes without any security
 features. **Do not expose Sherver on Internet**.
 
-- it is not currently able to serve over HTTPS
 - it uses rudimentary bash scripts to parse URL and POST request body, that could lead to security breaches
 - it executes blindly any script in the *scripts* subfolder
+- [HTTPS](./docs/https.md) only encrypts the transport, it fixes none of the above
 
 If you need to expose the site on internet, you need a real server that has been built especially to face all these
 issues.

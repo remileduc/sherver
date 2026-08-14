@@ -21,10 +21,19 @@
 
 load 'test_helper'
 
-# Internal: Start the server on a free port, and export it as `SHERVER_PORT`.
+# Internal: Start the server on a free port, and export the URL to reach it as
+# `SHERVER_URL` (plus `SHERVER_PORT` for the raw-socket test).
 function setup_file()
 {
 	command -v socat > /dev/null || skip 'socat is not installed'
+
+	# the suite follows the mode configured in sherver.sh — over TLS, `-k` on every curl
+	# stands in for trusting the certificate, whose names need not include localhost
+	local scheme='http'
+	if grep -q '^socat_options+=("OPENSSL-LISTEN' "$REPO_ROOT/sherver.sh"; then
+		scheme='https'
+		[ -f "$REPO_ROOT/certs/cert.pem" ] || skip 'HTTPS is on but certs/cert.pem is missing, see docs/https.md'
+	fi
 
 	local -i port
 	for (( port = 18080; port < 18120; port++ )); do
@@ -32,8 +41,8 @@ function setup_file()
 		local -i pid=$!
 		local -i try
 		for (( try = 0; try < 50; try++ )); do
-			if curl -s -o /dev/null --max-time 2 "http://localhost:$port/"; then
-				export SHERVER_PORT="$port" SHERVER_PID="$pid"
+			if curl -ks -o /dev/null --max-time 2 "$scheme://localhost:$port/"; then
+				export SHERVER_URL="$scheme://localhost:$port" SHERVER_PORT="$port" SHERVER_PID="$pid"
 				return 0
 			fi
 			# socat exits when the port is taken: stop polling and try the next one
@@ -58,7 +67,7 @@ function teardown_file()
 }
 
 @test "a real client is answered" {
-	run curl -s -i "http://localhost:$SHERVER_PORT/"
+	run curl -ks -i "$SHERVER_URL/"
 	[ "$status" -eq 0 ]
 	[[ "${lines[0]}" == 'HTTP/1.0 200 OK'* ]]
 	[[ "$output" == *'<h1>Sherver example</h1>'* ]]
@@ -67,13 +76,13 @@ function teardown_file()
 @test "the port given on the command line is the one it listens on" {
 	# setup_file only got a connection because sherver.sh honoured its argument
 	[ -n "$SHERVER_PORT" ]
-	run curl -s -o /dev/null -w '%{http_code}' "http://localhost:$SHERVER_PORT/index.sh"
+	run curl -ks -o /dev/null -w '%{http_code}' "$SHERVER_URL/index.sh"
 	[ "$output" = '200' ]
 }
 
 @test "a binary file survives the socket" {
-	run curl -s -o "$BATS_TEST_TMPDIR/venise.webp" \
-		"http://localhost:$SHERVER_PORT/file/venise.webp"
+	run curl -ks -o "$BATS_TEST_TMPDIR/venise.webp" \
+		"$SHERVER_URL/file/venise.webp"
 	[ "$status" -eq 0 ]
 	cmp "$BATS_TEST_TMPDIR/venise.webp" "$REPO_ROOT/file/venise.webp"
 }
@@ -82,8 +91,8 @@ function teardown_file()
 	# this is why socat is used rather than netcat, which breaks on concurrency
 	local -i i
 	for (( i = 0; i < 15; i++ )); do
-		curl -s -o /dev/null -w '%{http_code}\n' \
-			"http://localhost:$SHERVER_PORT/index.sh?client=$i" \
+		curl -ks -o /dev/null -w '%{http_code}\n' \
+			"$SHERVER_URL/index.sh?client=$i" \
 			> "$BATS_TEST_TMPDIR/client-$i" &
 	done
 	wait
@@ -96,7 +105,7 @@ function teardown_file()
 }
 
 @test "a POST from a real client reaches the script" {
-	run curl -s --data-binary 'hello there' "http://localhost:$SHERVER_PORT/"
+	run curl -ks --data-binary 'hello there' "$SHERVER_URL/"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"You just sent me 'hello there'!"* ]]
 }
@@ -104,6 +113,6 @@ function teardown_file()
 @test "the server survives a client that says nothing" {
 	# socat drops it after -T, and the next client must still be served
 	timeout 2 bash -c "exec 3<>/dev/tcp/localhost/$SHERVER_PORT; sleep 1" || true
-	run curl -s -o /dev/null -w '%{http_code}' "http://localhost:$SHERVER_PORT/"
+	run curl -ks -o /dev/null -w '%{http_code}' "$SHERVER_URL/"
 	[ "$output" = '200' ]
 }

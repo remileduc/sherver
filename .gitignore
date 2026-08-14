@@ -5,4 +5,7 @@ CLAUDE.md
 # tomdoc
 tomdoc.sh
 
+# TLS certificate and private key, see docs/https.md
+certs/
+
 
