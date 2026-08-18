@@ -72,7 +72,8 @@ function init_environment()
 	declare -g REQUEST_URL=''
 	# Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
 	#
-	# Informative only: the answer is always in HTTP 1.0.
+	# Informative only: the answer is always in HTTP 1.1 (RFC 9112 §2.3 — the version
+	# in the response advertises capability, so answering 1.1 to a 1.0 client is correct).
 	declare -g REQUEST_HTTP_VERSION=''
 	# Public: The headers from the request (associative array)
 	#
@@ -153,11 +154,11 @@ export -f init_environment
 #
 # Examples
 #
-#    log "> HTTP/1.0 200 OK
+#    log "> HTTP/1.1 200 OK
 #
 # will output
 #
-#    > HTTP/1.0 200 OK
+#    > HTTP/1.1 200 OK
 function log()
 {
 	printf '%s\n' "$@" >&2
@@ -335,7 +336,7 @@ export -f html_escape
 #
 # Takes 2 parameters: header name and header content.
 #
-# $1 - header name, one of the HTTP 1.0 standard value
+# $1 - header name, one of the HTTP 1.1 standard value
 # $2 - value of the header
 #
 # Examples
@@ -367,7 +368,7 @@ export -f add_header
 #
 # will result in:
 #
-#    HTTP/1.0 200 OK
+#    HTTP/1.1 200 OK
 #    Date: Thu, 04 Jul 2019 21:38:23 GMT
 #    Server: Sherver
 #    Cache-Control: private, max-age=60
@@ -379,10 +380,10 @@ function _send_header()
 	# tests. A request too broken to have a method is answered before those variables are filled
 	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${REQUEST_URL:--} $1"
 	# HTTP header
-	log_debug "> HTTP/1.0 $1 ${HTTP_RESPONSE[$1]}"
+	log_debug "> HTTP/1.1 $1 ${HTTP_RESPONSE[$1]}"
 	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a
 	# real CRLF and inject a header of its own
-	printf 'HTTP/1.0 %s %s\r\n' "$1" "${HTTP_RESPONSE[$1]}"
+	printf 'HTTP/1.1 %s %s\r\n' "$1" "${HTTP_RESPONSE[$1]}"
 	# Date
 	local datenow
 	datenow=$(date -uR)
@@ -399,7 +400,7 @@ function _send_header()
 }
 export -f _send_header
 
-# Public: Send the given answer in a HTTP 1.0 format.
+# Public: Send the given answer in a HTTP 1.1 format.
 #
 # Takes the response code as first parameter, then as many parameters as needed to write the answer.
 # They will be sent, separated by newlines.
@@ -425,7 +426,7 @@ export -f _send_header
 #
 # ```
 #
-#    HTTP/1.0 200 OK
+#    HTTP/1.1 200 OK
 #    Content-Type: text/plain
 #
 #    this is some
@@ -473,7 +474,7 @@ export -f send_response
 #
 # will create an answer that starts with
 #
-#    HTTP/1.0 404 Not Found
+#    HTTP/1.1 404 Not Found
 function send_error()
 {
 	# the access log already carries the code, so this one is only useful next to a dump
@@ -503,7 +504,7 @@ export -f send_error
 # Public: Send a redirect to the given URL as an answer.
 #
 # Takes the target URL, and optionally the response code: 302 (the default) for a
-# temporary redirect, 301 for a permanent one — the two redirects HTTP 1.0 defines.
+# temporary redirect, 301 for a permanent one — the two redirects `HTTP_RESPONSE` knows.
 # Anything else is refused with a 500: `send_response` would die expanding an unknown
 # code mid-answer, and the client would get nothing at all.
 #
@@ -525,7 +526,7 @@ export -f send_error
 #
 # will send an answer that starts with
 #
-#    HTTP/1.0 302 Found
+#    HTTP/1.1 302 Found
 #    Location: /index.sh
 function send_redirect()
 {
@@ -768,7 +769,7 @@ export -f _get_mimetype
 #
 # if the file exist, will send a response that starts with (assuming file size is 4 kio)
 #
-#    HTTP/1.0 200 OK
+#    HTTP/1.1 200 OK
 #    Content-Type: image/png
 #    Content-Length: 4096
 function send_file()

@@ -18,7 +18,7 @@
 load 'test_helper'
 
 @test "a file is served whole and unaltered" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 	[ "$(header Content-Length)" = "$(stat -c '%s' "$REPO_ROOT/file/venise.webp")" ]
 	body > "$BATS_TEST_TMPDIR/served"
@@ -28,7 +28,7 @@ load 'test_helper'
 @test "the mime type comes from the extension, and text types announce utf-8" {
 	local file type
 	while read -r file type; do
-		request '' "GET /file/$file HTTP/1.0"
+		request '' "GET /file/$file HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '200' ]
 		[ "$(header Content-Type)" = "$type" ]
 	done <<-'EOF'
@@ -40,13 +40,13 @@ load 'test_helper'
 }
 
 @test "HEAD of a file repeats the headers of the GET exactly" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local -r get_type="$(header Content-Type)"
 	local -r get_length="$(header Content-Length)"
 	local -r get_etag="$(header ETag)"
 	local -r get_names="$(header_names)"
 
-	request '' 'HEAD /file/venise.webp HTTP/1.0'
+	request '' 'HEAD /file/venise.webp HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 	[ -z "$(body)" ]
 	[ "$(header Content-Type)" = "$get_type" ]
@@ -56,15 +56,15 @@ load 'test_helper'
 }
 
 @test "a file answers with an ETag built from its size and mtime" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	[ "$(header ETag)" = "\"$(stat -c '%s-%Y' "$REPO_ROOT/file/venise.webp")\"" ]
 }
 
 @test "a matching If-None-Match is answered with a bodyless 304" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local -r etag="$(header ETag)"
 
-	request '' 'GET /file/venise.webp HTTP/1.0' "If-None-Match: $etag"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' "If-None-Match: $etag"
 	[ "$(status_code)" = '304' ]
 	[ -z "$(body)" ]
 	# a 304 carries the length of the answer it replaces, which the server cannot know
@@ -72,99 +72,99 @@ load 'test_helper'
 }
 
 @test "a stale If-None-Match gets the file again" {
-	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match: "0-0"'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'If-None-Match: "0-0"'
 	[ "$(status_code)" = '200' ]
 	[ -n "$(body)" ]
 }
 
 @test "a file answers with its Last-Modified date" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local expected
 	expected="$(date -uR -r "$REPO_ROOT/file/venise.webp")"
 	[ "$(header Last-Modified)" = "${expected/%+0000/GMT}" ]
 }
 
 @test "a matching If-Modified-Since is answered with a bodyless 304" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local -r date="$(header Last-Modified)"
 
-	request '' 'GET /file/venise.webp HTTP/1.0' "If-Modified-Since: $date"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' "If-Modified-Since: $date"
 	[ "$(status_code)" = '304' ]
 	[ -z "$(body)" ]
 }
 
 @test "an If-Modified-Since that is not ours gets the file again" {
 	# the comparison is an exact string match, like the ETag one
-	request '' 'GET /file/venise.webp HTTP/1.0' 'If-Modified-Since: Thu, 04 Jul 2019 21:38:23 GMT'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'If-Modified-Since: Thu, 04 Jul 2019 21:38:23 GMT'
 	[ "$(status_code)" = '200' ]
 	[ -n "$(body)" ]
 }
 
 @test "If-None-Match alone decides when both validators are sent" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local -r etag="$(header ETag)"
 	local -r date="$(header Last-Modified)"
 
 	# a stale ETag must win over a matching date...
-	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match: "0-0"' "If-Modified-Since: $date"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'If-None-Match: "0-0"' "If-Modified-Since: $date"
 	[ "$(status_code)" = '200' ]
 	# ...and a matching ETag over a stale date
-	request '' 'GET /file/venise.webp HTTP/1.0' "If-None-Match: $etag" \
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' "If-None-Match: $etag" \
 		'If-Modified-Since: Thu, 04 Jul 2019 21:38:23 GMT'
 	[ "$(status_code)" = '304' ]
 }
 
 @test "an empty If-None-Match does not swallow the If-Modified-Since" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local -r date="$(header Last-Modified)"
 
 	# the header is there but holds no validator, so the date is what decides
-	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match:' "If-Modified-Since: $date"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'If-None-Match:' "If-Modified-Since: $date"
 	[ "$(status_code)" = '304' ]
 	[ -z "$(body)" ]
 }
 
 @test "an If-None-Match of * matches whatever we would have sent" {
-	request '' 'GET /file/venise.webp HTTP/1.0' 'If-None-Match: *'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'If-None-Match: *'
 	[ "$(status_code)" = '304' ]
 	[ -z "$(body)" ]
 }
 
 @test "a POST is never answered with a 304" {
-	request '' 'GET /file/venise.webp HTTP/1.0'
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
 	local -r etag="$(header ETag)"
 	local -r date="$(header Last-Modified)"
 
 	# conditional requests are defined for GET and HEAD: a 304 here would leave the
 	# client with no representation at all for the body it just sent
-	request '' 'POST /file/venise.webp HTTP/1.0' "If-None-Match: $etag" \
+	request '' 'POST /file/venise.webp HTTP/1.1' 'Host: localhost' "If-None-Match: $etag" \
 		"If-Modified-Since: $date" 'Content-Length: 0'
 	[ "$(status_code)" = '200' ]
 	[ -n "$(body)" ]
 }
 
 @test "a missing file is a 404" {
-	request '' 'GET /file/nope.txt HTTP/1.0'
+	request '' 'GET /file/nope.txt HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 }
 
 @test "a directory is a 404 rather than a listing" {
-	request '' 'GET /file/pages HTTP/1.0'
+	request '' 'GET /file/pages HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
-	request '' 'GET /file/ HTTP/1.0'
+	request '' 'GET /file/ HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 }
 
 @test "a script can serve a file from outside its own directory" {
 	# page.sh runs from scripts/, so it reaches the page through ../file/
-	request '' 'GET /page.sh?page=page.html HTTP/1.0'
+	request '' 'GET /page.sh?page=page.html HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 	[ "$(header Content-Type)" = 'text/html; charset=utf-8' ]
 }
 
 @test "page.sh without its parameter is a 404" {
-	request '' 'GET /page.sh HTTP/1.0'
+	request '' 'GET /page.sh HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
-	request '' 'GET /page.sh?page= HTTP/1.0'
+	request '' 'GET /page.sh?page= HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 }

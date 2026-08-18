@@ -28,32 +28,32 @@ function filler()
 # ------------------------------------------------------------------- routing
 
 @test "GET / serves the index" {
-	request '' 'GET / HTTP/1.0'
+	request '' 'GET / HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 	[ "$(header Content-Type)" = 'text/html; charset=utf-8' ]
 	[[ "$(body)" == *'<h1>Sherver example</h1>'* ]]
 }
 
 @test "GET /index.html and /index.htm reach the same script" {
-	request '' 'GET /index.html HTTP/1.0'
+	request '' 'GET /index.html HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
-	request '' 'GET /index.htm HTTP/1.0'
+	request '' 'GET /index.htm HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 }
 
 @test "GET of an unknown script is a 404" {
-	request '' 'GET /nope.sh HTTP/1.0'
+	request '' 'GET /nope.sh HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 }
 
 @test "the library itself is not a reachable endpoint" {
 	# it is not executable, so run_script refuses it rather than running it
-	request '' 'GET /SHERVER_UTILS.sh HTTP/1.0'
+	request '' 'GET /SHERVER_UTILS.sh HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 }
 
 @test "the query string reaches the script" {
-	request '' 'GET /index.sh?test=youpi&answer=42 HTTP/1.0'
+	request '' 'GET /index.sh?test=youpi&answer=42 HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 	[[ "$(body)" == *'test: youpi'* ]]
 	[[ "$(body)" == *'answer: 42'* ]]
@@ -62,10 +62,10 @@ function filler()
 # -------------------------------------------------------------------- methods
 
 @test "HEAD sends the headers of the GET and no body" {
-	request '' 'GET / HTTP/1.0'
+	request '' 'GET / HTTP/1.1' 'Host: localhost'
 	local -r get_names="$(header_names)"
 
-	request '' 'HEAD / HTTP/1.0'
+	request '' 'HEAD / HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 	[ -z "$(body)" ]
 	[ "$(header_names)" = "$get_names" ]
@@ -75,14 +75,15 @@ function filler()
 }
 
 @test "POST hands the body to the script" {
-	request 'hello there' 'POST / HTTP/1.0' 'Content-Length: 11'
+	request 'hello there' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 11'
 	[ "$(status_code)" = '200' ]
 	[[ "$(body)" == *"You just sent me 'hello there'!"* ]]
 }
 
 @test "POST parses an urlencoded body, charset parameter and all" {
 	run --separate-stderr with_request \
-		'POST / HTTP/1.0
+		'POST / HTTP/1.1
+Host: localhost
 Content-Type: application/x-www-form-urlencoded; charset=UTF-8
 Content-Length: 21
 
@@ -96,7 +97,7 @@ a b' ]
 @test "an unsupported method is a 405" {
 	local method
 	for method in PUT DELETE OPTIONS PATCH TRACE; do
-		request '' "$method / HTTP/1.0"
+		request '' "$method / HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '405' ]
 	done
 }
@@ -118,7 +119,7 @@ a b' ]
 @test "a header line without a name is a 400, not a crash" {
 	local header
 	for header in ': naughty' ':naughty' $'\t: naughty'; do
-		request '' 'GET / HTTP/1.0' "$header"
+		request '' 'GET / HTTP/1.1' 'Host: localhost' "$header"
 		[ "$(status_code)" = '400' ]
 	done
 }
@@ -126,42 +127,42 @@ a b' ]
 @test "a URL that is not decodable is a 400" {
 	local url
 	for url in '/index.sh?a=%zz' '/%2' '/file/100%' '/index.sh?a=%00'; do
-		request '' "GET $url HTTP/1.0"
+		request '' "GET $url HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '400' ]
 	done
 }
 
 @test "a Content-Length that is not a number is a 400" {
-	request 'body' 'POST / HTTP/1.0' 'Content-Length: abc'
+	request 'body' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: abc'
 	[ "$(status_code)" = '400' ]
 }
 
 @test "a body shorter than Content-Length is a 400" {
-	request 'short' 'POST / HTTP/1.0' 'Content-Length: 999'
+	request 'short' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 999'
 	[ "$(status_code)" = '400' ]
 }
 
 # --------------------------------------------------------------- size limits
 
 @test "a request line over 8 kio is a 414" {
-	request '' "GET /$(filler 8200) HTTP/1.0"
+	request '' "GET /$(filler 8200) HTTP/1.1" 'Host: localhost'
 	[ "$(status_code)" = '414' ]
 }
 
 @test "headers over 8 kio are a 431" {
-	request '' 'GET / HTTP/1.0' "X-Long: $(filler 8200)"
+	request '' 'GET / HTTP/1.1' 'Host: localhost' "X-Long: $(filler 8200)"
 	[ "$(status_code)" = '431' ]
 }
 
 @test "a body over 64 kio is a 413" {
 	# refused on the announced length, so there is no need to send the bytes
-	request '' 'POST / HTTP/1.0' 'Content-Length: 65537'
+	request '' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 65537'
 	[ "$(status_code)" = '413' ]
 }
 
 @test "a Content-Length too big for the shell is a 413, not a crash" {
 	# outside test's integer range `-gt` errors out, which would skip the limit
-	request '' 'POST / HTTP/1.0' 'Content-Length: 99999999999999999999999'
+	request '' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 99999999999999999999999'
 	[ "$(status_code)" = '413' ]
 }
 
@@ -169,7 +170,8 @@ a b' ]
 
 @test "header names are matched case insensitively" {
 	run --separate-stderr with_request \
-		'GET / HTTP/1.0
+		'GET / HTTP/1.1
+Host: localhost
 X-MiXeD-CaSe: yes' \
 		'printf "%s\n" "${REQUEST_HEADERS[x-mixed-case]}"'
 	[ "$status" -eq 0 ]
@@ -177,7 +179,7 @@ X-MiXeD-CaSe: yes' \
 }
 
 @test "every response carries the default headers" {
-	request '' 'GET / HTTP/1.0'
+	request '' 'GET / HTTP/1.1' 'Host: localhost'
 	[ "$(header Server)" = 'Sherver' ]
 	[ "$(header Connection)" = 'close' ]
 	[ "$(header X-Content-Type-Options)" = 'nosniff' ]
@@ -185,32 +187,34 @@ X-MiXeD-CaSe: yes' \
 	[ -n "$(header Expires)" ]
 }
 
-@test "the status line is HTTP 1.0 whatever the client announced" {
-	request '' 'GET / HTTP/1.1'
-	[ "$(status_line)" = 'HTTP/1.0 200 OK' ]
+@test "the status line is HTTP 1.1 even to an HTTP 1.0 client" {
+	# the version advertises capability (RFC 9112 §2.3), it does not echo the request.
+	# Deliberately no Host header either: it is the HTTP 1.0 compatibility fixture
+	request '' 'GET / HTTP/1.0'
+	[ "$(status_line)" = 'HTTP/1.1 200 OK' ]
 }
 
 @test "an error page announces its own length" {
-	request '' 'GET /nope.sh HTTP/1.0'
+	request '' 'GET /nope.sh HTTP/1.1' 'Host: localhost'
 	[ "$(header Content-Length)" = "$(body | wc -c)" ]
 }
 
 # ------------------------------------------------------------------- logging
 
 @test "a served request logs exactly one access line" {
-	request '' 'GET /index.sh?a=1 HTTP/1.0'
+	request '' 'GET /index.sh?a=1 HTTP/1.1' 'Host: localhost'
 	# the address is socat's; driven as a filter there is none, hence the `-`
 	[ "$(log_output)" = '- GET /index.sh?a=1 200' ]
 }
 
 @test "an error logs its reason next to the access line" {
-	request '' 'GET /nope.sh HTTP/1.0'
+	request '' 'GET /nope.sh HTTP/1.1' 'Host: localhost'
 	[[ "$(log_output)" == *'NOT FOUND'* ]]
 	[[ "$(log_output)" == *'- GET /nope.sh 404'* ]]
 }
 
 @test "index.sh escapes what the client sent instead of reflecting it" {
-	request '' 'GET /index.sh?%3Cscript%3E=%3Cimg+onerror%3Dalert(1)%3E HTTP/1.0' \
+	request '' 'GET /index.sh?%3Cscript%3E=%3Cimg+onerror%3Dalert(1)%3E HTTP/1.1' 'Host: localhost' \
 		'X-Evil: <script>alert(2)</script>'
 	[ "$(status_code)" = '200' ]
 	# nothing the client wrote may come back as markup

@@ -24,17 +24,17 @@ load 'test_helper'
 # Internal: Check that the given URL is refused, and that the refusal leaks nothing.
 function refuses()
 {
-	request '' "GET $1 HTTP/1.0"
+	request '' "GET $1 HTTP/1.1" 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 	# a 403 would confirm the target exists, and the body must not name it either
-	[ "$(status_line)" = 'HTTP/1.0 404 Not Found' ]
+	[ "$(status_line)" = 'HTTP/1.1 404 Not Found' ]
 	[[ "$(body)" != *"$REPO_ROOT"* ]]
 }
 
 # Internal: Check that the given URL is served with a 200.
 function serves()
 {
-	request '' "GET $1 HTTP/1.0"
+	request '' "GET $1 HTTP/1.1" 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 }
 
@@ -114,7 +114,7 @@ function teardown()
 	local url
 	for url in '/file/../dispatcher.sh' '/../etc/passwd' '/file/nope' '/nope.sh' \
 		'/templates/template.html' '/page.sh?page=../../LICENSE'; do
-		request '' "GET $url HTTP/1.0"
+		request '' "GET $url HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" != '403' ]
 	done
 }

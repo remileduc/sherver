@@ -39,11 +39,11 @@ Use it for what is worth keeping on a busy server: errors, and the one line per 
 
 Examples
 
-     log "> HTTP/1.0 200 OK
+     log "> HTTP/1.1 200 OK
 
 will output
 
-     > HTTP/1.0 200 OK
+     > HTTP/1.1 200 OK
 
 
 `log_debug()`
@@ -154,7 +154,7 @@ Public: Add header for the response.
 
 Takes 2 parameters: header name and header content.
 
-* $1 - header name, one of the HTTP 1.0 standard value
+* $1 - header name, one of the HTTP 1.1 standard value
 * $2 - value of the header
 
 Examples
@@ -183,7 +183,7 @@ Examples
 
 will result in:
 
-     HTTP/1.0 200 OK
+     HTTP/1.1 200 OK
      Date: Thu, 04 Jul 2019 21:38:23 GMT
      Server: Sherver
      Cache-Control: private, max-age=60
@@ -193,7 +193,7 @@ will result in:
 `send_response()`
 -----------------
 
-Public: Send the given answer in a HTTP 1.0 format.
+Public: Send the given answer in a HTTP 1.1 format.
 
 Takes the response code as first parameter, then as many parameters as needed to write the answer. They will be sent, separated by newlines.
 
@@ -217,7 +217,7 @@ will send something like (depends on your default headers, see `RESPONSE_HEADERS
 
 ```
 
-     HTTP/1.0 200 OK
+     HTTP/1.1 200 OK
      Content-Type: text/plain
 
      this is some
@@ -240,7 +240,7 @@ Examples
 
 will create an answer that starts with
 
-     HTTP/1.0 404 Not Found
+     HTTP/1.1 404 Not Found
 
 
 `send_redirect()`
@@ -248,7 +248,7 @@ will create an answer that starts with
 
 Public: Send a redirect to the given URL as an answer.
 
-Takes the target URL, and optionally the response code: 302 (the default) for a temporary redirect, 301 for a permanent one — the two redirects HTTP 1.0 defines. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
+Takes the target URL, and optionally the response code: 302 (the default) for a temporary redirect, 301 for a permanent one — the two redirects `HTTP_RESPONSE` knows. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
 
 The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form.
 
@@ -265,7 +265,7 @@ Examples
 
 will send an answer that starts with
 
-     HTTP/1.0 302 Found
+     HTTP/1.1 302 Found
      Location: /index.sh
 
 
@@ -344,7 +344,7 @@ Examples
 
 if the file exist, will send a response that starts with (assuming file size is 4 kio)
 
-     HTTP/1.0 200 OK
+     HTTP/1.1 200 OK
      Content-Type: image/png
      Content-Length: 4096
 
