@@ -91,7 +91,7 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 - dynamic pages
 - templated HTML so you don't have to duplicate headers and footers
 - parse of URL query string, percent decoded (so `/file/my%20file.txt` finds `my file.txt`)
-- support for GET, HEAD and POST
+- support for GET, HEAD, POST and OPTIONS
 - deal with client cache resources
 - easily extandable
 	- can run any scripts or executable of any languages as soon as they output something on `stdout`
@@ -100,7 +100,9 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 All of these makes Sherver the perfect tool to run a small server that will serve few pages on your local network.
 
 Even if it sounds awesome, Sherver still has the following limitations:
-- only support HTTP GET, HEAD and POST requests, though it would be easy to add the others
+- only support HTTP GET, HEAD, POST and OPTIONS requests, though it would be easy to add the others:
+  `PUT`, `DELETE`, `PATCH`, `TRACE` and `CONNECT` get a `405` carrying an `Allow` header, and
+  anything else a `501`
 - concurrency is capped at 32 connections: `socat` forks one process per connection and makes the
   next ones wait for a free slot, so a burst queues instead of thrashing the machine
 - no keep alive: this is HTTP 1.0 with `Connection: close`, so one request per connection
@@ -214,7 +216,9 @@ the requests in a text format:
 #!/bin/bash
 
 init_environment
+# `OPTIONS` is advertised but not tested: the dispatcher answers it before routing
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
+	add_header 'Allow' 'GET, HEAD, OPTIONS'
 	send_error 405
 fi
 
@@ -253,7 +257,9 @@ And you would use it with the following script:
 #!/bin/bash
 
 init_environment
+# `OPTIONS` is advertised but not tested: the dispatcher answers it before routing
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
+	add_header 'Allow' 'GET, HEAD, OPTIONS'
 	send_error 405
 fi
 

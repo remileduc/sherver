@@ -21,7 +21,7 @@ The dispatcher runs from the root, so we take the current directory. It is then 
 `REQUEST_METHOD`
 ----------------
 
-Public: The method of the request (GET, HEAD, POST...)
+Public: The method of the request (one of GET, HEAD, POST and OPTIONS)
 
 `REQUEST_URL`
 -------------
@@ -73,6 +73,13 @@ Public: The response headers (associative array)
 ---------------
 
 Public: Generic HTTP response code with their meaning (associative array)
+
+`SUPPORTED_METHODS`
+-------------------
+
+Public: The methods the server accepts, as an `Allow` header value
+
+`read_request()` tests the request method against it and sends it with its 405, and the dispatcher answers `OPTIONS` with it, so adding a method here cannot leave a stale `Allow` behind. A single script advertises its own list instead, `Allow` being a property of the target resource and not of the server (RFC 9110 §10.2.1).
 
 `MAX_BODY_SIZE`
 ---------------

@@ -94,11 +94,49 @@ name=r%C3%A9mi&up=a+b' \
 a b' ]
 }
 
-@test "an unsupported method is a 405" {
+@test "a known but unsupported method is a 405 carrying Allow" {
 	local method
-	for method in PUT DELETE OPTIONS PATCH TRACE; do
+	for method in PUT DELETE PATCH TRACE CONNECT; do
 		request '' "$method / HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '405' ]
+		[ "$(header Allow)" = 'GET, HEAD, POST, OPTIONS' ]
+	done
+}
+
+@test "an unknown method is a 501" {
+	local method
+	# `get` included: method names are case sensitive, so it is not a GET
+	for method in BREW FOO get; do
+		request '' "$method / HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '501' ]
+	done
+}
+
+@test "a script answers its own 405 with Allow" {
+	request '' 'DELETE /page.sh?page=page.html HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '405' ]
+	# the dispatcher never reaches the script for DELETE, so this is the library's list
+	[ "$(header Allow)" = 'GET, HEAD, POST, OPTIONS' ]
+	request '' 'POST /page.sh?page=page.html HTTP/1.1' 'Host: localhost' 'Content-Length: 0'
+	[ "$(status_code)" = '405' ]
+	[ "$(header Allow)" = 'GET, HEAD, OPTIONS' ]
+}
+
+@test "OPTIONS is answered server wide with Allow and an empty body" {
+	request '' 'OPTIONS / HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[ "$(header Allow)" = 'GET, HEAD, POST, OPTIONS' ]
+	[ "$(header Content-Length)" = '0' ]
+	[ -z "$(body)" ]
+}
+
+@test "OPTIONS answers before any routing" {
+	# asterisk form (RFC 9112 §3.2.4), and a path that would otherwise be a 404
+	local target
+	for target in '*' '/nope.sh' '/file/nope.txt'; do
+		request '' "OPTIONS $target HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '200' ]
+		[ "$(header Allow)" = 'GET, HEAD, POST, OPTIONS' ]
 	done
 }
 

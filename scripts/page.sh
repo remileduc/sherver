@@ -19,7 +19,10 @@ set -efu
 
 init_environment
 
+# OPTIONS is advertised but not accepted here: the dispatcher answers it before routing,
+# so it never reaches a script. Handle it in the test below if that ever changes
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
+	add_header 'Allow' 'GET, HEAD, OPTIONS'
 	send_error 405
 fi
 # `:-` because `set -u` makes a missing key fatal, which would end up as a 500

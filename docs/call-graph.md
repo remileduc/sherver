@@ -13,6 +13,7 @@ Processes
 sherver.sh ──exec──> socat ──fork+exec (per connection)──> dispatcher.sh
                                                                │ source scripts/SHERVER_UTILS.sh
                                                                │ init_environment
+                                                               ├─ method OPTIONS     ──> send_response 200
                                                                ├─ /file/*            ──> send_file
                                                                ├─ / or /index.htm[l] ──> run_script '/index.sh'
                                                                └─ anything else      ──> run_script "$REQUEST_URL"
@@ -59,6 +60,7 @@ flowchart TD
     dispatcher --> init_environment
     dispatcher --> send_file
     dispatcher --> run_script
+    dispatcher --> send_response
 
     init_environment --> read_request
     read_request --> bail_request
@@ -80,7 +82,6 @@ flowchart TD
     index --> init_environment
     index --> html_escape
     index --> send_response
-    index --> send_error
     page --> init_environment
     page --> send_error
     page --> send_file
@@ -102,7 +103,7 @@ The same edges as a table, with the process boundaries spelled out:
 | Caller             | Calls                                                                           |
 | ------------------ | ------------------------------------------------------------------------------- |
 | `sherver.sh`       | `socat` (exec: socat becomes the listener)                                      |
-| `dispatcher.sh`    | `init_environment`, then `send_file` or `run_script`                            |
+| `dispatcher.sh`    | `init_environment`, then `send_response` (OPTIONS), `send_file` or `run_script` |
 | `init_environment` | `read_request`                                                                  |
 | `read_request`     | `_bail_request`, `_check_encoding`, `parse_url`, `_url_decode`, `send_error`    |
 | `_bail_request`    | `send_error`                                                                    |
@@ -113,7 +114,7 @@ The same edges as a table, with the process boundaries spelled out:
 | `send_error`       | `send_response`                                                                 |
 | `send_redirect`    | `send_response`, `send_error`                                                   |
 | `send_response`    | `_send_header`                                                                  |
-| `scripts/index.sh` | `init_environment`, `html_escape`, `send_response`, `send_error`                |
+| `scripts/index.sh` | `init_environment`, `html_escape`, `send_response`                              |
 | `scripts/page.sh`  | `init_environment`, `send_error`, `send_file`                                   |
 
 `send_file` answers a 304 through `send_response`, but streams a 200 itself: `_send_header` then
@@ -128,16 +129,15 @@ Error codes
 Which function sends which code through `send_error` (`read_request` routes its early parse
 failures through `_bail_request`, which owns the dump-and-log convention):
 
-| Function           | Codes                        | Sent when                                                 |
-| ------------------ | ---------------------------- | --------------------------------------------------------- |
-| `read_request`     | 400, 405, 413, 414, 431, 505 | bad request line, header or body; method; version; limits |
-| `parse_url`        | 400                          | invalid percent encoding                                  |
-| `_resolve_path`    | 404, 500                     | path missing or escaping the tree — never 403             |
-| `run_script`       | 404, 500                     | endpoint not executable, or it exited non-zero            |
-| `send_file`        | 404                          | not a readable regular file                               |
-| `send_redirect`    | 500                          | no target, a CR or LF in it, or non-redirect code         |
-| `scripts/index.sh` | 405                          | method other than GET, HEAD or POST                       |
-| `scripts/page.sh`  | 404, 405                     | missing `page` parameter; method not GET or HEAD          |
+| Function           | Codes                             | Sent when                                                 |
+| ------------------ | --------------------------------- | --------------------------------------------------------- |
+| `read_request`     | 400, 405, 413, 414, 431, 501, 505 | bad request line, header or body; method; version; limits |
+| `parse_url`        | 400                               | invalid percent encoding                                  |
+| `_resolve_path`    | 404, 500                          | path missing or escaping the tree — never 403             |
+| `run_script`       | 404, 500                          | endpoint not executable, or it exited non-zero            |
+| `send_file`        | 404                               | not a readable regular file                               |
+| `send_redirect`    | 500                               | no target, a CR or LF in it, or non-redirect code         |
+| `scripts/page.sh`  | 404, 405                          | missing `page` parameter; method not GET or HEAD          |
 
 External commands
 -----------------

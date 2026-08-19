@@ -66,7 +66,7 @@ function init_environment()
 		SHERVER_ROOT=$(realpath .) || { log "FATAL: cannot canonicalize '$PWD'"; exit 1; }
 	fi
 	export SHERVER_ROOT
-	# Public: The method of the request (GET, HEAD, POST...)
+	# Public: The method of the request (one of GET, HEAD, POST and OPTIONS)
 	declare -g REQUEST_METHOD=''
 	# Public: The requested URL
 	declare -g REQUEST_URL=''
@@ -115,8 +115,16 @@ function init_environment()
 		[414]='URI Too Long'
 		[431]='Request Header Fields Too Large'
 		[500]='Internal Server Error'
+		[501]='Not Implemented'
 		[505]='HTTP Version Not Supported'
 	)
+	# Public: The methods the server accepts, as an `Allow` header value
+	#
+	# `read_request()` tests the request method against it and sends it with its 405, and the
+	# dispatcher answers `OPTIONS` with it, so adding a method here cannot leave a stale
+	# `Allow` behind. A single script advertises its own list instead, `Allow` being a property
+	# of the target resource and not of the server (RFC 9110 §10.2.1).
+	declare -rg SUPPORTED_METHODS='GET, HEAD, POST, OPTIONS'
 	# Public: Biggest request body we accept to read, in bytes
 	#
 	# The body ends up in `REQUEST_FULL_STRING`, which we export. Linux refuses to run a
@@ -953,13 +961,22 @@ function read_request()
 	if [[ "$REQUEST_HTTP_VERSION" != HTTP/1.* ]]; then
 		_bail_request 505 "UNSUPPORTED VERSION: '$REQUEST_HTTP_VERSION'" "$1"
 	fi
-	# Only GET, HEAD and POST are supported at this time
-	case "$REQUEST_METHOD" in
-		GET|HEAD|POST) ;;
-		*)
-			_bail_request 405 "METHOD NOT ALLOWED: '$REQUEST_METHOD'" "$1"
-			;;
-	esac
+	# Membership test and not a `case` pattern: a variable expanded into a pattern has its
+	# `|` taken literally, which would silently match nothing. Method names are case
+	# sensitive (RFC 9110 §9.1), so a lowercase `get` is an unknown method, not a GET
+	if [[ ",${SUPPORTED_METHODS// /}," != *",$REQUEST_METHOD,"* ]]; then
+		case "$REQUEST_METHOD" in
+			# a method we know but don't serve: 405 MUST carry `Allow` (RFC 9110 §15.5.6)
+			PUT|DELETE|PATCH|TRACE|CONNECT)
+				add_header 'Allow' "$SUPPORTED_METHODS"
+				_bail_request 405 "METHOD NOT ALLOWED: '$REQUEST_METHOD'" "$1"
+				;;
+			# a method we don't know at all is a 501, not a 405 (RFC 9110 §9.1)
+			*)
+				_bail_request 501 "METHOD NOT IMPLEMENTED: '$REQUEST_METHOD'" "$1"
+				;;
+		esac
+	fi
 	# `parse_url` decodes the URL, so a broken encoding can't be answered
 	if ! _check_encoding "$REQUEST_URL"; then
 		_bail_request 400 "BAD REQUEST: invalid percent encoding in '$REQUEST_URL'" "$1"
