@@ -876,6 +876,33 @@ function run_script()
 }
 export -f run_script
 
+# Internal: Log a request parse failure, dump the request when relevant, and answer an error.
+#
+# **Note:** this method is used by `read_request()` and shouldn't be called manually.
+#
+# Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse
+# only (a child script re-parse would dump it once per script), the reason is always
+# `log`ged, and `send_error()` ends the process — this function never returns. Only for the
+# bail-outs *before* the end of the header loop: after that point, the first parse has
+# already dumped the full request unconditionally, and this would dump it a second time.
+#
+# $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
+# $2 - the reason, `log`ged as is
+# $3 - true when parsing from the standard input, false in a child script re-parse
+#
+# Examples
+#
+#    _bail_request 400 'BAD REQUEST: malformed request line' true
+function _bail_request()
+{
+	if [ "$3" = true ]; then
+		log_debug "$REQUEST_FULL_STRING"
+	fi
+	log "$2"
+	send_error "$1"
+}
+export -f _bail_request
+
 # Internal: Read the client request and set up environment.
 #
 # **Note:** this method is used by the dispatcher and shouldn't be called manually.
@@ -914,45 +941,28 @@ function read_request()
 
 	# read URL
 	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
-	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] || [ -z "$REQUEST_HTTP_VERSION" ]; then
-		if [ "$1" = true ]; then
-			log_debug "$REQUEST_FULL_STRING"
-		fi
-		log 'BAD REQUEST: malformed request line'
-		send_error 400
+	# `read` collapses SP/TAB runs and drops trailing blanks (a leniency RFC 9112 §3 grants),
+	# so only non-whitespace extra tokens get glued into the version and rejected here.
+	# [0123456789] and not [0-9]: bracket ranges follow the locale and would take unicode digits
+	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] \
+			|| [[ ! "$REQUEST_HTTP_VERSION" =~ ^HTTP/[0123456789]\.[0123456789]$ ]]; then
+		_bail_request 400 'BAD REQUEST: malformed request line' "$1"
 	fi
-	# an unparseable version is a malformed request line — this also catches extra tokens,
-	# which the IFS split glues into the field; another major version is a 505 (RFC 9112 §2.3)
-	if [[ ! "$REQUEST_HTTP_VERSION" =~ ^HTTP/([0-9])\.[0-9]$ ]]; then
-		if [ "$1" = true ]; then
-			log_debug "$REQUEST_FULL_STRING"
-		fi
-		log "BAD REQUEST: unparseable HTTP version '$REQUEST_HTTP_VERSION'"
-		send_error 400
-	elif [ "${BASH_REMATCH[1]}" != '1' ]; then
-		if [ "$1" = true ]; then
-			log_debug "$REQUEST_FULL_STRING"
-		fi
-		log "UNSUPPORTED VERSION: '$REQUEST_HTTP_VERSION'"
-		send_error 505
+	# a literal `HTTP/0.9` token means the client speaks the 1.x line format (real 0.9 has no
+	# version token and took the 400 above), so a headered 505 is safe here (RFC 9112 §2.3)
+	if [[ "$REQUEST_HTTP_VERSION" != HTTP/1.* ]]; then
+		_bail_request 505 "UNSUPPORTED VERSION: '$REQUEST_HTTP_VERSION'" "$1"
 	fi
 	# Only GET, HEAD and POST are supported at this time
 	case "$REQUEST_METHOD" in
 		GET|HEAD|POST) ;;
 		*)
-			if [ "$1" = true ]; then
-				log_debug "$REQUEST_FULL_STRING"
-			fi
-			send_error 405
+			_bail_request 405 "METHOD NOT ALLOWED: '$REQUEST_METHOD'" "$1"
 			;;
 	esac
 	# `parse_url` decodes the URL, so a broken encoding can't be answered
 	if ! _check_encoding "$REQUEST_URL"; then
-		if [ "$1" = true ]; then
-			log_debug "$REQUEST_FULL_STRING"
-		fi
-		log "BAD REQUEST: invalid percent encoding in '$REQUEST_URL'"
-		send_error 400
+		_bail_request 400 "BAD REQUEST: invalid percent encoding in '$REQUEST_URL'" "$1"
 	fi
 	# fill URL_*
 	parse_url "$REQUEST_URL"
@@ -962,8 +972,7 @@ function read_request()
 	while read -r line; do
 		# checked first, for the same reasons as the request line above
 		if [ $(( ${#REQUEST_FULL_STRING} + ${#line} + 1 )) -gt "$MAX_HEADERS_SIZE" ]; then
-			log "TOO LARGE: headers over the $MAX_HEADERS_SIZE characters limit"
-			send_error 431
+			_bail_request 431 "TOO LARGE: headers over the $MAX_HEADERS_SIZE characters limit" "$1"
 		fi
 		line=${line%%$'\r'}
 		# reached the end of the headers, break.
@@ -975,8 +984,7 @@ $line"
 		IFS=$': \t' read -r key value <<< "$line"
 		# an empty name is a fatal `bad array subscript`, and only a broken client sends one
 		if [ -z "$key" ]; then
-			log 'BAD REQUEST: header line without a name'
-			send_error 400
+			_bail_request 400 'BAD REQUEST: header line without a name' "$1"
 		fi
 		# header names are case insensitive, so we normalize them to lowercase
 		REQUEST_HEADERS["${key,,}"]="$value"
@@ -984,10 +992,10 @@ $line"
 	if [ "$1" = true ]; then
 		log_debug "$REQUEST_FULL_STRING"
 	fi
-	# an HTTP 1.1 request must carry a Host header (RFC 9112 §3.2). Presence only:
-	# the value is not used (same tree served regardless) and duplicates still overwrite
-	if [ "$REQUEST_HTTP_VERSION" = 'HTTP/1.1' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
-		log 'BAD REQUEST: HTTP/1.1 request without a Host header'
+	# RFC 9112: §3.2 requires Host on 1.1, and §2.3 processes a higher 1.x minor as 1.1, so
+	# only 1.0 is exempt. Presence only: value unused (same tree served), duplicates overwrite
+	if [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
+		log "BAD REQUEST: $REQUEST_HTTP_VERSION request without a Host header"
 		send_error 400
 	fi
 

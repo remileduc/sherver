@@ -376,6 +376,24 @@ will do the following
      './index.sh' '/index.sh?dummy=stuff'
 
 
+`_bail_request()`
+-----------------
+
+Internal: Log a request parse failure, dump the request when relevant, and answer an error.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse only (a child script re-parse would dump it once per script), the reason is always `log`ged, and `send_error()` ends the process — this function never returns. Only for the bail-outs *before* the end of the header loop: after that point, the first parse has already dumped the full request unconditionally, and this would dump it a second time.
+
+* $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
+* $2 - the reason, `log`ged as is
+* $3 - true when parsing from the standard input, false in a child script re-parse
+
+Examples
+
+     _bail_request 400 'BAD REQUEST: malformed request line' true
+
+
 `read_request()`
 ----------------
 

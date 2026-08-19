@@ -41,6 +41,7 @@ flowchart TD
     subgraph library ["scripts/SHERVER_UTILS.sh"]
         init_environment
         read_request
+        bail_request["_bail_request (exit)"]
         parse_url
         check_encoding[_check_encoding]
         url_decode[_url_decode]
@@ -60,10 +61,12 @@ flowchart TD
     dispatcher --> run_script
 
     init_environment --> read_request
+    read_request --> bail_request
     read_request --> check_encoding
     read_request --> parse_url
     read_request --> url_decode
     read_request --> send_error
+    bail_request --> send_error
     parse_url --> check_encoding
     parse_url --> url_decode
     parse_url --> send_error
@@ -101,7 +104,8 @@ The same edges as a table, with the process boundaries spelled out:
 | `sherver.sh`       | `socat` (exec: socat becomes the listener)                                      |
 | `dispatcher.sh`    | `init_environment`, then `send_file` or `run_script`                            |
 | `init_environment` | `read_request`                                                                  |
-| `read_request`     | `_check_encoding`, `parse_url`, `_url_decode`, `send_error`                     |
+| `read_request`     | `_bail_request`, `_check_encoding`, `parse_url`, `_url_decode`, `send_error`    |
+| `_bail_request`    | `send_error`                                                                    |
 | `parse_url`        | `_check_encoding`, `_url_decode`, `send_error`                                  |
 | `run_script`       | `parse_url`, `_resolve_path`, `send_error`, the endpoint (exec)                 |
 | `send_file`        | `_resolve_path`, `_get_mimetype`, `send_response`, `_send_header`, `send_error` |
@@ -121,18 +125,19 @@ Leaf functions (nothing below them but `log`/`log_debug`): `_check_encoding`, `_
 Error codes
 -----------
 
-Which function sends which code through `send_error`:
+Which function sends which code through `send_error` (`read_request` routes its early parse
+failures through `_bail_request`, which owns the dump-and-log convention):
 
-| Function           | Codes                   | Sent when                                          |
-| ------------------ | ----------------------- | -------------------------------------------------- |
-| `read_request`     | 400, 405, 413, 414, 431 | bad request line, header or body; method; limits   |
-| `parse_url`        | 400                     | invalid percent encoding                           |
-| `_resolve_path`    | 404, 500                | path missing or escaping the tree — never 403      |
-| `run_script`       | 404, 500                | endpoint not executable, or it exited non-zero     |
-| `send_file`        | 404                     | not a readable regular file                        |
-| `send_redirect`    | 500                     | no target, a CR or LF in it, or non-redirect code  |
-| `scripts/index.sh` | 405                     | method other than GET, HEAD or POST                |
-| `scripts/page.sh`  | 404, 405                | missing `page` parameter; method not GET or HEAD   |
+| Function           | Codes                        | Sent when                                                 |
+| ------------------ | ---------------------------- | --------------------------------------------------------- |
+| `read_request`     | 400, 405, 413, 414, 431, 505 | bad request line, header or body; method; version; limits |
+| `parse_url`        | 400                          | invalid percent encoding                                  |
+| `_resolve_path`    | 404, 500                     | path missing or escaping the tree — never 403             |
+| `run_script`       | 404, 500                     | endpoint not executable, or it exited non-zero            |
+| `send_file`        | 404                          | not a readable regular file                               |
+| `send_redirect`    | 500                          | no target, a CR or LF in it, or non-redirect code         |
+| `scripts/index.sh` | 405                          | method other than GET, HEAD or POST                       |
+| `scripts/page.sh`  | 404, 405                     | missing `page` parameter; method not GET or HEAD          |
 
 External commands
 -----------------

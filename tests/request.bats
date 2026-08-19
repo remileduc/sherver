@@ -124,9 +124,18 @@ a b' ]
 	done
 }
 
-@test "extra tokens on the request line are a 400" {
+@test "non-whitespace extra tokens on the request line are a 400" {
 	request '' 'GET / HTTP/1.1 extra' 'Host: localhost'
 	[ "$(status_code)" = '400' ]
+}
+
+@test "whitespace-only extras on the request line are tolerated" {
+	# `read` eats them before the version check ever runs; RFC 9112 §3 grants the leniency
+	local line
+	for line in 'GET / HTTP/1.1 ' 'GET  /  HTTP/1.1' $'GET\t/\tHTTP/1.1'; do
+		request '' "$line" 'Host: localhost'
+		[ "$(status_code)" = '200' ]
+	done
 }
 
 @test "an HTTP major version other than 1 is a 505" {
@@ -135,6 +144,14 @@ a b' ]
 		request '' "GET / $version" 'Host: localhost'
 		[ "$(status_code)" = '505' ]
 	done
+}
+
+@test "an HTTP 1.x minor above 1 is served as 1.1, Host gate included" {
+	# RFC 9112 §2.3: process it as the highest minor version we conform to
+	request '' 'GET / HTTP/1.9' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	request '' 'GET / HTTP/1.9'
+	[ "$(status_code)" = '400' ]
 }
 
 @test "a header line without a name is a 400, not a crash" {
