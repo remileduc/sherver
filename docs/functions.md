@@ -412,6 +412,8 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 * `URL_BASE`
 * `URL_PARAMETERS`
 
+An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — replaces `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
+
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 
 * $1 - true when parsing from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so that a request is not dumped once per script it goes through

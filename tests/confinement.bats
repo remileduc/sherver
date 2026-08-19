@@ -68,6 +68,14 @@ function teardown()
 	refuses '/file//etc/passwd'
 }
 
+@test "an escape hidden in an absolute-form target is refused" {
+	# the target is rewritten to its path before anything resolves it, so it lands in the
+	# same check as an origin form — the authority is no way around it
+	refuses 'http://example.com/file/../dispatcher.sh'
+	refuses 'https://example.com/../../etc/passwd'
+	refuses 'http://example.com//etc/passwd'
+}
+
 @test "a percent encoded escape is refused" {
 	# the URL is decoded before it is resolved, so this is the same as `..`
 	refuses '/file/%2e%2e/dispatcher.sh'

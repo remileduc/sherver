@@ -68,7 +68,11 @@ function init_environment()
 	export SHERVER_ROOT
 	# Public: The method of the request (one of GET, HEAD, POST and OPTIONS)
 	declare -g REQUEST_METHOD=''
-	# Public: The requested URL
+	# Public: The requested URL, always as a path (`*` alone for an asterisk-form `OPTIONS`)
+	#
+	# An absolute-form target (`GET http://host/path`, the form a proxy sends) is rewritten
+	# by `read_request()` to the path it points at, and any other non-path target is a 400,
+	# so scripts never see a scheme or a host.
 	declare -g REQUEST_URL=''
 	# Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
 	#
@@ -139,6 +143,11 @@ function init_environment()
 	declare -rg MAX_HEADERS_SIZE=$((8 * 1024))
 	# Internal: canonical path computed by `_resolve_path()`
 	declare -g RESOLVED_PATH=''
+	# Internal: the request-target exactly as the client sent it
+	#
+	# The access log reads it instead of `REQUEST_URL`, which loses the absolute form to the
+	# rewrite in `read_request()` — the log must keep proxy-style requests greppable.
+	declare -g REQUEST_TARGET=''
 	# Public: `true` when verbose logging is on, see `log_debug()`
 	#
 	# Read from the environment because that is the only channel that survives the exec into
@@ -389,7 +398,7 @@ function _send_header()
 	# the access log: the only line a quiet server writes for a request it served. socat's
 	# EXEC sets the peer address; a `-` means no socat in front, like the filter-driven
 	# tests. A request too broken to have a method is answered before those variables are filled
-	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${REQUEST_URL:--} $1"
+	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${REQUEST_TARGET:--} $1"
 	# HTTP header
 	log_debug "> HTTP/1.1 $1 ${HTTP_RESPONSE[$1]}"
 	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a
@@ -926,6 +935,11 @@ export -f _bail_request
 # * `URL_BASE`
 # * `URL_PARAMETERS`
 #
+# An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to
+# the path it points at, and its authority — validated first — replaces
+# `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400,
+# the asterisk form of `OPTIONS` excepted.
+#
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 #
 # $1 - true when parsing from the standard input, false when re-parsing
@@ -949,11 +963,11 @@ function read_request()
 
 	# read URL
 	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
+	REQUEST_TARGET="$REQUEST_URL"	# saved before the rewrite below, for the access log
 	# `read` collapses SP/TAB runs and drops trailing blanks (a leniency RFC 9112 §3 grants),
 	# so only non-whitespace extra tokens get glued into the version and rejected here.
-	# [0123456789] and not [0-9]: bracket ranges follow the locale and would take unicode digits
 	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] \
-			|| [[ ! "$REQUEST_HTTP_VERSION" =~ ^HTTP/[0123456789]\.[0123456789]$ ]]; then
+			|| [[ ! "$REQUEST_HTTP_VERSION" =~ ^HTTP/[[:digit:]]\.[[:digit:]]$ ]]; then
 		_bail_request 400 'BAD REQUEST: malformed request line' "$1"
 	fi
 	# a literal `HTTP/0.9` token means the client speaks the 1.x line format (real 0.9 has no
@@ -976,6 +990,34 @@ function read_request()
 				_bail_request 501 "METHOD NOT IMPLEMENTED: '$REQUEST_METHOD'" "$1"
 				;;
 		esac
+	fi
+	# empty until the target proves absolute-form, then holds its validated authority
+	local authority=''
+	# RFC 9112 §3.2.2: the absolute-form target a proxy sends MUST be accepted. Rewritten to
+	# the origin form here, before anything reads the URL, so that `parse_url`,
+	# `_resolve_path` and the child scripts only ever see a path. Only the scheme is case
+	# insensitive (RFC 3986 §3.1), so everything is cut out of the original
+	if [[ "${REQUEST_URL,,}" =~ ^https?:// ]]; then
+		# a fragment is no part of a request-target (RFC 9112 §3.2), so it is cut off
+		# here rather than glued back onto the path
+		local -r target="${REQUEST_URL%%#*}"
+		# the authority ends at the first `/` or `?` (RFC 3986 §3.2), and what follows it
+		# keeps its own delimiter — cutting on `/` alone would eat a `?query`
+		local rest="${target#*://}"
+		authority="${rest%%[/?]*}"
+		rest="${rest:${#authority}}"
+		# RFC 9110 §4.2: an empty host is invalid in an http(s) URI and userinfo is an
+		# error — and nothing downstream `_check_encoding`s what lands in `Host` here
+		if [ -z "$authority" ] || [[ "$authority" == *@* ]] \
+				|| ! _check_encoding "$authority"; then
+			_bail_request 400 "BAD REQUEST: invalid authority in '$REQUEST_URL'" "$1"
+		fi
+		REQUEST_URL="/${rest#/}"	# an absolute URI needs no path, and no path is the root
+	fi
+	# RFC 9112 §3.2: past the rewrite the target must be a path — the asterisk form, that
+	# only `OPTIONS` may use, is the one exception. Nothing else may reach the routing
+	if [[ "$REQUEST_URL" != /* ]] && [ "$REQUEST_METHOD $REQUEST_URL" != 'OPTIONS *' ]; then
+		_bail_request 400 "BAD REQUEST: unsupported request target '$REQUEST_URL'" "$1"
 	fi
 	# `parse_url` decodes the URL, so a broken encoding can't be answered
 	if ! _check_encoding "$REQUEST_URL"; then
@@ -1009,6 +1051,12 @@ $line"
 	if [ "$1" = true ]; then
 		log_debug "$REQUEST_FULL_STRING"
 	fi
+	# RFC 9112 §3.2.2: with an absolute-form target, its authority wins and the `Host` header
+	# MUST be ignored. Done here and not with the rewrite above, where the header loop would
+	# then let a `Host:` line overwrite it and invert the MUST
+	if [ -n "$authority" ]; then
+		REQUEST_HEADERS['host']="$authority"
+	fi
 	# RFC 9112: §3.2 requires Host on 1.1, and §2.3 processes a higher 1.x minor as 1.1, so
 	# only 1.0 is exempt. Presence only: value unused (same tree served), duplicates overwrite
 	if [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
@@ -1021,7 +1069,7 @@ $line"
 		local -r length="${REQUEST_HEADERS['content-length']}"
 		# a bogus length makes `read` fail with a bash error, and a huge one makes it wait
 		# for bytes that will never come, so we check it before using it
-		if [[ ! $length =~ ^[0-9]+$ ]]; then
+		if [[ ! $length =~ ^[[:digit:]]+$ ]]; then
 			log "BAD REQUEST: invalid Content-Length '$length'"
 			send_error 400
 		fi

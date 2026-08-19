@@ -140,6 +140,91 @@ a b' ]
 	done
 }
 
+# --------------------------------------------------------- absolute-form URL
+
+@test "an absolute-form target is served as its path" {
+	# RFC 9112 §3.2.2, what a proxy sends. The scheme is case insensitive, the path is not
+	local target
+	for target in 'http://example.com/index.sh?test=youpi' \
+		'HTTPS://Example.COM/index.sh?test=youpi' \
+		'http://example.com:8080/index.sh?test=youpi'; do
+		request '' "GET $target HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '200' ]
+		[[ "$(body)" == *'test: youpi'* ]]
+	done
+}
+
+@test "an absolute-form target with no path is the root" {
+	local target
+	for target in 'http://example.com' 'http://example.com/'; do
+		request '' "GET $target HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '200' ]
+		[[ "$(body)" == *'<h1>Sherver example</h1>'* ]]
+	done
+}
+
+@test "a query string survives a target that has no path" {
+	# the authority stops at the `?` as well, so the query is not swallowed with it
+	request '' 'GET http://example.com?test=youpi HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == *'test: youpi'* ]]
+}
+
+@test "an absolute-form target satisfies the Host requirement on its own" {
+	# its authority is the host, so a 1.1 request needs no Host header
+	request '' 'GET http://example.com/ HTTP/1.1'
+	[ "$(status_code)" = '200' ]
+}
+
+@test "the authority of an absolute-form target overrides the Host header" {
+	# RFC 9112 §3.2.2 makes it a MUST, whichever order the client sends them in
+	run --separate-stderr with_request \
+		'GET http://authority.example/index.sh HTTP/1.1
+Host: header.example' \
+		'printf "%s\n" "$REQUEST_URL" "${REQUEST_HEADERS[host]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '/index.sh
+authority.example' ]
+}
+
+@test "a fragment on an absolute-form target is dropped, not glued onto the path" {
+	# a request-target carries no fragment (RFC 9112 §3.2), wherever the client put one
+	request '' 'GET http://example.com/index.sh?test=youpi#frag HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == *'test: youpi'* ]]
+	request '' 'GET http://example.com#frag HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == *'<h1>Sherver example</h1>'* ]]
+}
+
+@test "an absolute-form target with an invalid authority is a 400" {
+	# RFC 9110 §4.2: an http(s) URI with an empty host is invalid and userinfo is an
+	# error, and the authority must be decodable like everything else client-sent
+	local target
+	for target in 'http://' 'http:///index.sh' 'http://user:pass@example.com/index.sh' \
+		'http://a%00b/index.sh' 'http://100%/index.sh'; do
+		request '' "GET $target HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "a target that is neither a path nor a form we rewrite is a 400" {
+	# RFC 9112 §3.2: origin, absolute (http/https here) and asterisk forms are all there
+	# is — and the asterisk one belongs to OPTIONS alone
+	local target
+	for target in 'ftp://example.com/x' 'Zindex.sh' '*'; do
+		request '' "GET $target HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "the access log shows an absolute-form target as the client sent it" {
+	# the rewrite must not hide proxy-style requests from whoever greps the log
+	request '' 'GET http://example.com/index.sh HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[[ "$(log_output)" == *'GET http://example.com/index.sh 200'* ]]
+}
+
 # ------------------------------------------------------------ malformed input
 
 @test "an empty request is a 400" {

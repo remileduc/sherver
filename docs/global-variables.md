@@ -26,7 +26,9 @@ Public: The method of the request (one of GET, HEAD, POST and OPTIONS)
 `REQUEST_URL`
 -------------
 
-Public: The requested URL
+Public: The requested URL, always as a path (`*` alone for an asterisk-form `OPTIONS`)
+
+An absolute-form target (`GET http://host/path`, the form a proxy sends) is rewritten by `read_request()` to the path it points at, and any other non-path target is a 400, so scripts never see a scheme or a host.
 
 `REQUEST_HTTP_VERSION`
 ----------------------
