@@ -72,8 +72,10 @@ function init_environment()
 	declare -g REQUEST_URL=''
 	# Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
 	#
-	# Informative only: the answer is always in HTTP 1.1 (RFC 9112 §2.3 — the version
-	# in the response advertises capability, so answering 1.1 to a 1.0 client is correct).
+	# `read_request()` rejects anything that is not `HTTP/1.x` (400 when unparseable, 505
+	# on another major version), so scripts only ever see 1.x here. The answer is always
+	# in HTTP 1.1 (RFC 9112 §2.3 — the version in the response advertises capability, so
+	# answering 1.1 to a 1.0 client is correct).
 	declare -g REQUEST_HTTP_VERSION=''
 	# Public: The headers from the request (associative array)
 	#
@@ -113,6 +115,7 @@ function init_environment()
 		[414]='URI Too Long'
 		[431]='Request Header Fields Too Large'
 		[500]='Internal Server Error'
+		[505]='HTTP Version Not Supported'
 	)
 	# Public: Biggest request body we accept to read, in bytes
 	#
@@ -917,6 +920,21 @@ function read_request()
 		fi
 		log 'BAD REQUEST: malformed request line'
 		send_error 400
+	fi
+	# an unparseable version is a malformed request line — this also catches extra tokens,
+	# which the IFS split glues into the field; another major version is a 505 (RFC 9112 §2.3)
+	if [[ ! "$REQUEST_HTTP_VERSION" =~ ^HTTP/([0-9])\.[0-9]$ ]]; then
+		if [ "$1" = true ]; then
+			log_debug "$REQUEST_FULL_STRING"
+		fi
+		log "BAD REQUEST: unparseable HTTP version '$REQUEST_HTTP_VERSION'"
+		send_error 400
+	elif [ "${BASH_REMATCH[1]}" != '1' ]; then
+		if [ "$1" = true ]; then
+			log_debug "$REQUEST_FULL_STRING"
+		fi
+		log "UNSUPPORTED VERSION: '$REQUEST_HTTP_VERSION'"
+		send_error 505
 	fi
 	# Only GET, HEAD and POST are supported at this time
 	case "$REQUEST_METHOD" in

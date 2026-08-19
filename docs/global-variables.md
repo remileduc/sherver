@@ -33,7 +33,7 @@ Public: The requested URL
 
 Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
 
-Informative only: the answer is always in HTTP 1.1 (RFC 9112 §2.3 — the version in the response advertises capability, so answering 1.1 to a 1.0 client is correct).
+`read_request()` rejects anything that is not `HTTP/1.x` (400 when unparseable, 505 on another major version), so scripts only ever see 1.x here. The answer is always in HTTP 1.1 (RFC 9112 §2.3 — the version in the response advertises capability, so answering 1.1 to a 1.0 client is correct).
 
 `REQUEST_HEADERS`
 -----------------

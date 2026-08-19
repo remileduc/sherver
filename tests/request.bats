@@ -116,6 +116,27 @@ a b' ]
 	[ "$(status_code)" = '400' ]
 }
 
+@test "a version that is not HTTP/major.minor is a 400" {
+	local version
+	for version in 'HTP/1.1' 'HTTP/1.1garbage' 'HTTP/11' 'http/1.1'; do
+		request '' "GET / $version" 'Host: localhost'
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "extra tokens on the request line are a 400" {
+	request '' 'GET / HTTP/1.1 extra' 'Host: localhost'
+	[ "$(status_code)" = '400' ]
+}
+
+@test "an HTTP major version other than 1 is a 505" {
+	local version
+	for version in 'HTTP/2.0' 'HTTP/0.9'; do
+		request '' "GET / $version" 'Host: localhost'
+		[ "$(status_code)" = '505' ]
+	done
+}
+
 @test "a header line without a name is a 400, not a crash" {
 	local header
 	for header in ': naughty' ':naughty' $'\t: naughty'; do
