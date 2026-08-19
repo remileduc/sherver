@@ -984,6 +984,12 @@ $line"
 	if [ "$1" = true ]; then
 		log_debug "$REQUEST_FULL_STRING"
 	fi
+	# an HTTP 1.1 request must carry a Host header (RFC 9112 §3.2). Presence only:
+	# the value is not used (same tree served regardless) and duplicates still overwrite
+	if [ "$REQUEST_HTTP_VERSION" = 'HTTP/1.1' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
+		log 'BAD REQUEST: HTTP/1.1 request without a Host header'
+		send_error 400
+	fi
 
 	# fill REQUEST_BODY if POST
 	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['content-length']" ]; then

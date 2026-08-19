@@ -145,6 +145,12 @@ a b' ]
 	done
 }
 
+@test "an HTTP 1.1 request without a Host header is a 400" {
+	# RFC 9112 §3.2. The HTTP 1.0 fixture below proves 1.0 stays exempt
+	request '' 'GET / HTTP/1.1'
+	[ "$(status_code)" = '400' ]
+}
+
 @test "a URL that is not decodable is a 400" {
 	local url
 	for url in '/index.sh?a=%zz' '/%2' '/file/100%' '/index.sh?a=%00'; do
@@ -213,6 +219,13 @@ X-MiXeD-CaSe: yes' \
 	# Deliberately no Host header either: it is the HTTP 1.0 compatibility fixture
 	request '' 'GET / HTTP/1.0'
 	[ "$(status_line)" = 'HTTP/1.1 200 OK' ]
+}
+
+@test "the Host header survives the child script re-parse" {
+	# index.sh re-parses REQUEST_FULL_STRING in its own process: the Host line must
+	# round-trip through it, or every scripted endpoint would 400 on the second parse
+	request '' 'GET /index.sh HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
 }
 
 @test "an error page announces its own length" {
