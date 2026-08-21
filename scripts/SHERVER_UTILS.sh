@@ -394,7 +394,6 @@ export -f add_header
 #    Date: Thu, 04 Jul 2019 21:38:23 GMT
 #    Server: Sherver
 #    Cache-Control: private, max-age=60
-#    Expires: Thu, 04 Jul 2019 21:38:23 GMT
 function _send_header()
 {
 	# the access log: the only line a quiet server writes for a request it served. socat's
@@ -406,12 +405,13 @@ function _send_header()
 	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a
 	# real CRLF and inject a header of its own
 	printf 'HTTP/1.1 %s %s\r\n' "$1" "${HTTP_RESPONSE[$1]}"
-	# Date
+	# Date. No `Expires` next to it: `Cache-Control` already carries the lifetime, and a cache
+	# must ignore `Expires` whenever `max-age` is there (RFC 9111 §5.3), so the second field
+	# only ever gets to disagree with the first
 	local datenow
 	datenow=$(date -uR)
 	datenow=${datenow/%+0000/GMT}
 	add_header 'Date' "$datenow"
-	add_header 'Expires' "$datenow"
 	# rest of the headers
 	local i
 	for i in "${!RESPONSE_HEADERS[@]}"; do
@@ -488,6 +488,10 @@ export -f send_response
 # Takes one parameter: the error code. It will be sent as an answer, along with a very small
 # HTML explaining what is the error.
 #
+# The answer is `Cache-Control: no-store` and carries none of the cache validators that may
+# already have been set: this page is not the representation they describe, and several of
+# these codes are triggered by a request header that nothing nominates in a `Vary`.
+#
 # $1 - the error code, see `HTTP_RESPONSE`
 #
 # Examples
@@ -497,6 +501,7 @@ export -f send_response
 # will create an answer that starts with
 #
 #    HTTP/1.1 404 Not Found
+#    Cache-Control: no-store
 function send_error()
 {
 	# the access log already carries the code, so this one is only useful next to a dump
@@ -519,6 +524,12 @@ function send_error()
 EOF
 )
 	add_header 'Content-Type' 'text/html; charset=utf-8'
+	# a 416 gets here holding the ETag and the date of the file it refused a range of, and
+	# they describe that file, not this page
+	unset -v 'RESPONSE_HEADERS[ETag]' 'RESPONSE_HEADERS[Last-Modified]'
+	# nothing puts `Range` — or a header length, or the version — in a `Vary`, so a stored
+	# 416, 431 or 505 could be replayed for a later request the server would have answered
+	add_header 'Cache-Control' 'no-store'
 	send_response "$@" "$html"
 }
 export -f send_error
@@ -859,15 +870,16 @@ function send_file()
 	# anything unparseable — several ranges, another unit, garbage, a number too long for
 	# bash's 64-bit arithmetic — falls through to the full 200: §14.2 allows ignoring the
 	# header wholesale, so the full answer is always a correct one, never an error
+	# each number is captured twice: the outer group makes it optional, the inner one holds it
+	# without its leading zeros, so the 18-digit cap measures its magnitude and not its padding
 	if [ "$REQUEST_METHOD" = 'GET' ] \
-			&& [[ "${REQUEST_HEADERS['range']:-}" =~ ^bytes=([[:digit:]]*)-([[:digit:]]*)$ ]] \
-			&& [ -n "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" ] \
-			&& [ "${#BASH_REMATCH[1]}" -le 18 ] && [ "${#BASH_REMATCH[2]}" -le 18 ]; then
-		# `10#` pins base ten: a client's leading zero would otherwise read as octal, and
-		# `bytes=08-` would die on an invalid constant. The 18-digits cap above keeps the
-		# conversion inside bash's arithmetic range
-		local -r from="${BASH_REMATCH[1]:+$(( 10#${BASH_REMATCH[1]} ))}"
-		local -r to="${BASH_REMATCH[2]:+$(( 10#${BASH_REMATCH[2]} ))}"
+			&& [[ "${REQUEST_HEADERS['range']:-}" =~ ^bytes=(0*([[:digit:]]+))?-(0*([[:digit:]]+))?$ ]] \
+			&& [ -n "${BASH_REMATCH[2]}${BASH_REMATCH[4]}" ] \
+			&& [ "${#BASH_REMATCH[2]}" -le 18 ] && [ "${#BASH_REMATCH[4]}" -le 18 ]; then
+		# the regex already dropped the zeros, so `10#` is only a belt-and-braces base-ten
+		# pin: without it a padded value would read as octal, and `bytes=08-` would die
+		local -r from="${BASH_REMATCH[2]:+$(( 10#${BASH_REMATCH[2]} ))}"
+		local -r to="${BASH_REMATCH[4]:+$(( 10#${BASH_REMATCH[4]} ))}"
 		# a stale If-Range means the client's copy changed under it: it needs the whole
 		# file, not a piece of the new one. Exact string match, like the validators above
 		local -r if_range="${REQUEST_HEADERS['if-range']:-}"
@@ -1016,6 +1028,8 @@ export -f _bail_request
 function read_request()
 {
 	local line
+	# this bail-out and the 414 below stay outside `_bail_request`: `REQUEST_FULL_STRING`
+	# is not filled yet, so its debug dump would be empty
 	if ! read -r line; then
 		log 'BAD REQUEST: empty request'
 		send_error 400
@@ -1043,9 +1057,16 @@ function read_request()
 	if [[ "$REQUEST_HTTP_VERSION" != HTTP/1.* ]]; then
 		_bail_request 505 "UNSUPPORTED VERSION: '$REQUEST_HTTP_VERSION'" "$1"
 	fi
+	# RFC 9112 §3: a method is a token (RFC 9110 §5.6.2 tchar), so a stray octet in it is a
+	# malformed request line — a 400 — where a well-formed unknown method is a 501 below
+	local -r tchar=$'^[[:alnum:]!#$%&\'*+.^_`|~-]+$'
+	if [[ ! "$REQUEST_METHOD" =~ $tchar ]]; then
+		_bail_request 400 "BAD REQUEST: invalid method token '$REQUEST_METHOD'" "$1"
+	fi
 	# Membership test and not a `case` pattern: a variable expanded into a pattern has its
-	# `|` taken literally, which would silently match nothing. Method names are case
-	# sensitive (RFC 9110 §9.1), so a lowercase `get` is an unknown method, not a GET
+	# `|` taken literally, which would silently match nothing. Exact because the tchar check
+	# above keeps the `,` delimiter out of the method, so it cannot span two list entries.
+	# Method names are case sensitive (RFC 9110 §9.1): a lowercase `get` is not a GET
 	if [[ ",${SUPPORTED_METHODS// /}," != *",$REQUEST_METHOD,"* ]]; then
 		case "$REQUEST_METHOD" in
 			# a method we know but don't serve: 405 MUST carry `Allow` (RFC 9110 §15.5.6)
@@ -1074,9 +1095,10 @@ function read_request()
 		local rest="${target#*://}"
 		authority="${rest%%[/?]*}"
 		rest="${rest:${#authority}}"
-		# RFC 9110 §4.2: an empty host is invalid in an http(s) URI and userinfo is an
-		# error — and nothing downstream `_check_encoding`s what lands in `Host` here
-		if [ -z "$authority" ] || [[ "$authority" == *@* ]] \
+		# RFC 9110 §4.2: an empty host — bare or in front of a `:port` — is invalid in an
+		# http(s) URI and userinfo is an error — and nothing downstream `_check_encoding`s
+		# what lands in `Host` here
+		if [ -z "${authority%%:*}" ] || [[ "$authority" == *@* ]] \
 				|| ! _check_encoding "$authority"; then
 			_bail_request 400 "BAD REQUEST: invalid authority in '$REQUEST_URL'" "$1"
 		fi
@@ -1134,13 +1156,16 @@ $line"
 
 	# fill REQUEST_BODY if POST
 	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['content-length']" ]; then
-		local -r length="${REQUEST_HEADERS['content-length']}"
+		local -r raw_length="${REQUEST_HEADERS['content-length']}"
 		# a bogus length makes `read` fail with a bash error, and a huge one makes it wait
 		# for bytes that will never come, so we check it before using it
-		if [[ ! $length =~ ^[[:digit:]]+$ ]]; then
-			log "BAD REQUEST: invalid Content-Length '$length'"
+		if [[ ! $raw_length =~ ^0*([[:digit:]]+)$ ]]; then
+			log "BAD REQUEST: invalid Content-Length '$raw_length'"
 			send_error 400
 		fi
+		# the group drops the leading zeros `1*DIGIT` allows, so the cap below measures the
+		# magnitude and not the padding — same rule as the Range parser
+		local -r length="${BASH_REMATCH[1]}"
 		# outside `test`'s integer range, `-gt` errors out and counts as false, which would
 		# silently skip the limit. 10 digits is far above the limit anyway
 		if [ "${#length}" -gt 10 ] || [ "$length" -gt "$MAX_BODY_SIZE" ]; then

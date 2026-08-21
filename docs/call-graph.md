@@ -117,8 +117,9 @@ The same edges as a table, with the process boundaries spelled out:
 | `scripts/index.sh` | `init_environment`, `html_escape`, `send_response`                              |
 | `scripts/page.sh`  | `init_environment`, `send_error`, `send_file`                                   |
 
-`send_file` answers a 304 through `send_response`, but streams a 200 itself: `_send_header` then
-`cat`. `_send_header` writes the status line, the headers and the one access log line per request.
+`send_file` answers a 304 through `send_response`, but streams the body itself: `_send_header` then
+`cat` for a 200, or `tail -c | head -c` for a 206. `_send_header` writes the status line, the headers
+and the one access log line per request.
 
 Leaf functions (nothing below them but `log`/`log_debug`): `_check_encoding`, `_url_decode`,
 `html_escape`, `add_header`, `_get_mimetype`, `_send_header`.
@@ -135,7 +136,7 @@ failures through `_bail_request`, which owns the dump-and-log convention):
 | `parse_url`        | 400                               | invalid percent encoding                                  |
 | `_resolve_path`    | 404, 500                          | path missing or escaping the tree — never 403             |
 | `run_script`       | 404, 500                          | endpoint not executable, or it exited non-zero            |
-| `send_file`        | 404                               | not a readable regular file                               |
+| `send_file`        | 404, 416                          | not a readable regular file; unsatisfiable `Range`        |
 | `send_redirect`    | 500                               | no target, a CR or LF in it, or non-redirect code         |
 | `scripts/page.sh`  | 404, 405                          | missing `page` parameter; method not GET or HEAD          |
 
@@ -149,4 +150,6 @@ External commands
 | `stat`     | `send_file` (ETag, `Last-Modified`, `Content-Length`)        |
 | `date`     | `_send_header`                                               |
 | `cat`      | `send_file` (body), heredocs in `send_error` and `index.sh`  |
+| `tail`     | `send_file` (a range answer, piped into `head`)              |
+| `head`     | `send_file` (a range answer)                                 |
 | `envsubst` | `index.sh`                                                   |

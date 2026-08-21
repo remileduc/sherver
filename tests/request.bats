@@ -112,6 +112,16 @@ a b' ]
 	done
 }
 
+@test "a method that is not a token is a 400, not a 501" {
+	# RFC 9112 §3: a stray octet in the method is a malformed request line, not an unknown
+	# method. The comma-glued ones would even span entries of the supported-methods list
+	local method
+	for method in GET,HEAD HEAD,POST 'GE(T' 'GET;' '"GET"'; do
+		request '' "$method / HTTP/1.1" 'Host: localhost'
+		[ "$(status_code)" = '400' ]
+	done
+}
+
 @test "a script answers its own 405 with Allow" {
 	request '' 'DELETE /page.sh?page=page.html HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '405' ]
@@ -201,7 +211,9 @@ authority.example' ]
 	# RFC 9110 §4.2: an http(s) URI with an empty host is invalid and userinfo is an
 	# error, and the authority must be decodable like everything else client-sent
 	local target
+	# `:8080` and `:` are an empty host too, and would land in `Host` and skip its 400
 	for target in 'http://' 'http:///index.sh' 'http://user:pass@example.com/index.sh' \
+		'http://:8080/index.sh' 'http://:/index.sh' \
 		'http://a%00b/index.sh' 'http://100%/index.sh'; do
 		request '' "GET $target HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '400' ]
@@ -333,6 +345,16 @@ authority.example' ]
 	[ "$(status_code)" = '413' ]
 }
 
+@test "a Content-Length is measured on its value, not its padding" {
+	# `1*DIGIT` allows leading zeros, which say nothing about magnitude
+	request 'hello there' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 00000000011'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == *"You just sent me 'hello there'!"* ]]
+	# and padding must not smuggle a huge value past the digit cap either
+	request '' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 000000000099999999999'
+	[ "$(status_code)" = '413' ]
+}
+
 # ------------------------------------------------------------------- headers
 
 @test "header names are matched case insensitively" {
@@ -351,7 +373,17 @@ X-MiXeD-CaSe: yes' \
 	[ "$(header Connection)" = 'close' ]
 	[ "$(header X-Content-Type-Options)" = 'nosniff' ]
 	[ -n "$(header Date)" ]
-	[ -n "$(header Expires)" ]
+	# no `Expires`: a cache ignores it whenever `max-age` is there (RFC 9111 §5.3), so it
+	# could only ever contradict the `Cache-Control` above
+	[[ "$(header_names)" != *expires* ]]
+}
+
+@test "an error page is never stored" {
+	# several codes depend on a request header nothing nominates in a `Vary` (Range, the
+	# header-size limits, the version), so a stored error page could answer a good request
+	request '' 'GET /file/nope.txt HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '404' ]
+	[ "$(header Cache-Control)" = 'no-store' ]
 }
 
 @test "the status line is HTTP 1.1 even to an HTTP 1.0 client" {

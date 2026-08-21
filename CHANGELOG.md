@@ -12,6 +12,53 @@ A version number says how stable the scripting API is — the library functions 
 must not be exposed on Internet, at 1.0 as at 0.1 (see
 [About security](./README.md#about-security)).
 
+1.1 — 2026-08-21
+----------------
+
+Sherver speaks HTTP/1.1 now, and behaves like it: the request line and the `Host` header are
+validated, `OPTIONS` is answered, and a file can be served by byte range — which is what makes
+`<video>` seeking work. Nothing was removed from the scripting API.
+
+- **answers in HTTP/1.1**, to a 1.0 client as well (RFC 9112 §2.3 — the version in the response
+  says what the server can do, not what the request was). `REQUEST_HTTP_VERSION` is validated
+  instead of merely parsed: anything that is not `HTTP/1.x` is a `400`, another major version a
+  `505`
+- **`Host` is mandatory** on an HTTP/1.1 request, missing it is a `400`. An HTTP/1.0 request
+  without `Host` stays legal
+- **byte ranges**: every file answer announces `Accept-Ranges: bytes`, and a GET carrying a single
+  `Range: bytes=…` gets a `206` with its `Content-Range`. A range starting past the end of the file
+  is a `416`; a stale `If-Range`, several ranges, another unit or plain garbage are ignored and the
+  whole file is served, never an error
+- **`OPTIONS`**, answered by the dispatcher for any target, `*` included, with `Allow` and an empty
+  body. `PUT`, `DELETE`, `PATCH`, `TRACE` and `CONNECT` still get a `405`, which now carries `Allow`
+  as RFC 9110 §15.5.6 requires — **do the same before your own `send_error 405`**. A method that is
+  none of those gets a `501` instead of a `405`
+- **absolute-form request target**: `GET http://host/path HTTP/1.1` is accepted, as RFC 9112 §3.2.2
+  requires of a server. Scripts see the rewritten path in `REQUEST_URL`, and the authority in the
+  target replaces whatever `Host` the client sent
+- **an error is never stored**: `send_error` answers `Cache-Control: no-store` and drops any `ETag` and
+  `Last-Modified` already set
+- **no more `Expires`**: `Cache-Control` is the only freshness field now. A cache must ignore `Expires`
+  whenever `max-age` is there (RFC 9111 §5.3), and the one Sherver sent carried the `Date` itself, so
+  it could only contradict the `private, max-age=60` next to it. `add_header 'Expires' …` still puts
+  it back on an answer of your own
+- `HTTP_RESPONSE` gains the codes that go with all this: `206`, `416`, `501`, `505`
+- `tail` and `head` join the external commands, for range answers only — busybox's are enough
+- add support for redirections 301/302
+- add support for `Last-Modified` header
+- add IP in logs
+
+Deliberately left out, and worth knowing about:
+
+- **no keep alive**, and none planned: `Connection: close` on every response is a compliant opt-out
+  (RFC 9112 §9.6), and one process per connection is the whole architecture
+- a **chunked request body** is read as no body at all, where it should get a `411`. No common
+  client sends one unprompted
+- **`Expect: 100-continue`** is not answered: a client that waits for the interim response eats
+  socat's timeout and sends anyway
+- the **header parser is still naive**: a line without a colon, whitespace before the colon, a
+  folded line, a duplicated `Host` or `Content-Length` — none of them are rejected
+
 1.0 — 2026-08-14
 ----------------
 

@@ -187,7 +187,6 @@ will result in:
      Date: Thu, 04 Jul 2019 21:38:23 GMT
      Server: Sherver
      Cache-Control: private, max-age=60
-     Expires: Thu, 04 Jul 2019 21:38:23 GMT
 
 
 `send_response()`
@@ -232,6 +231,8 @@ Public: Send the given error as an answer.
 
 Takes one parameter: the error code. It will be sent as an answer, along with a very small HTML explaining what is the error.
 
+The answer is `Cache-Control: no-store` and carries none of the cache validators that may already have been set: this page is not the representation they describe, and several of these codes are triggered by a request header that nothing nominates in a `Vary`.
+
 * $1 - the error code, see `HTTP_RESPONSE`
 
 Examples
@@ -241,6 +242,7 @@ Examples
 will create an answer that starts with
 
      HTTP/1.1 404 Not Found
+     Cache-Control: no-store
 
 
 `send_redirect()`

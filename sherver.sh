@@ -19,7 +19,7 @@ set -efu
 
 cd "$(dirname "$0")"
 
-declare -r SHERVER_VERSION='1.0'
+declare -r SHERVER_VERSION='1.1'
 
 # the environment is the only thing the dispatcher and the scripts it runs inherit from us
 if [ "${1:-}" = '--debug' ]; then

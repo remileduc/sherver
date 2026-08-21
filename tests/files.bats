@@ -207,6 +207,35 @@ load 'test_helper'
 	[ "$(header Content-Range)" = "bytes */$size" ]
 }
 
+@test "a 416 is uncacheable and carries none of the file's validators" {
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=999999999-'
+	[ "$(status_code)" = '416' ]
+	# nothing nominates Range in a Vary, so a storable 416 could be replayed for a plain GET
+	[ "$(header Cache-Control)" = 'no-store' ]
+	# this is the one error path reached with the validators of a file already set: they
+	# describe that file, and the body here is the error page
+	local -r names="$(header_names)"
+	[[ "$names" != *etag* ]]
+	[[ "$names" != *last-modified* ]]
+}
+
+@test "leading zeros in a range are legal digits, not garbage" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	# RFC 9110 reads these as `1*DIGIT`: 21 digits of padding is still the number 3
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=000-000000000000000000003'
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Range)" = "bytes 0-3/$size" ]
+	[ "$(header Content-Length)" = '4' ]
+
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=-0000000000000000000004'
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Range)" = "bytes $(( size - 4 ))-$(( size - 1 ))/$size" ]
+
+	# and a padded zero-length suffix is still the 416 that `bytes=-0` is
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=-000'
+	[ "$(status_code)" = '416' ]
+}
+
 @test "an unparseable or multi-range Range is ignored, never an error" {
 	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
 	local range
