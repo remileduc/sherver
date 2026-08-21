@@ -331,6 +331,8 @@ Every answer carries two cache validators: an `ETag` built from the size and mti
 
 Only a GET or a HEAD is answered that way: a 304 to a POST would leave the client without a representation of what it just sent.
 
+Every answer also announces `Accept-Ranges: bytes`, and a GET carrying a single byte range (`Range: bytes=0-499`, `bytes=500-`, `bytes=-500`) is answered with a `206 Partial Content` and the matching `Content-Range` — what `<video>` seeking needs. A range starting past the end of the file is a `416 Range Not Satisfiable`. Every other form — several ranges, another unit, garbage — is ignored and the whole file is served, as RFC 9110 §14.2 allows; so is the whole header when an `If-Range` is present and is not exactly the current ETag.
+
 The path generally comes from the URL (`URL_BASE`). You just need to remove the first `/` to get a relative path.
 
 *Note* that to find the correct mimetype, we use `_get_mimetype()`, which deduces it from the extension of the file.

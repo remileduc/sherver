@@ -143,6 +143,120 @@ load 'test_helper'
 	[ -n "$(body)" ]
 }
 
+@test "every file answer announces Accept-Ranges: bytes" {
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[ "$(header Accept-Ranges)" = 'bytes' ]
+}
+
+@test "a single byte range is answered with a 206 and the exact bytes" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=0-3'
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Range)" = "bytes 0-3/$size" ]
+	[ "$(header Content-Length)" = '4' ]
+	body > "$BATS_TEST_TMPDIR/served"
+	head -c 4 -- "$REPO_ROOT/file/venise.webp" > "$BATS_TEST_TMPDIR/expected"
+	cmp "$BATS_TEST_TMPDIR/served" "$BATS_TEST_TMPDIR/expected"
+}
+
+@test "an open-ended range runs to the end of the file" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=4-'
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Range)" = "bytes 4-$(( size - 1 ))/$size" ]
+	[ "$(header Content-Length)" = "$(( size - 4 ))" ]
+	body > "$BATS_TEST_TMPDIR/served"
+	tail -c '+5' -- "$REPO_ROOT/file/venise.webp" > "$BATS_TEST_TMPDIR/expected"
+	cmp "$BATS_TEST_TMPDIR/served" "$BATS_TEST_TMPDIR/expected"
+}
+
+@test "a suffix range serves the last N bytes" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=-4'
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Range)" = "bytes $(( size - 4 ))-$(( size - 1 ))/$size" ]
+	[ "$(header Content-Length)" = '4' ]
+	body > "$BATS_TEST_TMPDIR/served"
+	tail -c 4 -- "$REPO_ROOT/file/venise.webp" > "$BATS_TEST_TMPDIR/expected"
+	cmp "$BATS_TEST_TMPDIR/served" "$BATS_TEST_TMPDIR/expected"
+}
+
+@test "a range end past the file is clamped to its size" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=0-999999999'
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Range)" = "bytes 0-$(( size - 1 ))/$size" ]
+	[ "$(header Content-Length)" = "$size" ]
+	body > "$BATS_TEST_TMPDIR/served"
+	cmp "$BATS_TEST_TMPDIR/served" "$REPO_ROOT/file/venise.webp"
+}
+
+@test "a range starting past the end of the file is a 416" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=999999999-'
+	[ "$(status_code)" = '416' ]
+	# RFC 9110 §15.3.7: the 416 tells the client how big the file actually is
+	[ "$(header Content-Range)" = "bytes */$size" ]
+}
+
+@test "a suffix range of zero bytes is a 416" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=-0'
+	[ "$(status_code)" = '416' ]
+	[ "$(header Content-Range)" = "bytes */$size" ]
+}
+
+@test "an unparseable or multi-range Range is ignored, never an error" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	local range
+	while read -r range; do
+		request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' "Range: $range"
+		[ "$(status_code)" = '200' ]
+		[ "$(header Content-Length)" = "$size" ]
+	done <<-'EOF'
+		bytes=0-1,5-9
+		bytes=-
+		bytes=5-2
+		items=0-3
+		bytes=garbage
+		bytes=99999999999999999999-
+	EOF
+}
+
+@test "a stale If-Range disables the range and serves the whole file" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=0-3' 'If-Range: "0-0"'
+	[ "$(status_code)" = '200' ]
+	[ "$(header Content-Length)" = "$size" ]
+}
+
+@test "an If-Range matching the ETag lets the range through" {
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
+	local -r etag="$(header ETag)"
+
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=0-3' "If-Range: $etag"
+	[ "$(status_code)" = '206' ]
+	[ "$(header Content-Length)" = '4' ]
+}
+
+@test "a matching If-None-Match wins over a Range" {
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost'
+	local -r etag="$(header ETag)"
+
+	request '' 'GET /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=0-3' "If-None-Match: $etag"
+	[ "$(status_code)" = '304' ]
+	[ -z "$(body)" ]
+}
+
+@test "a HEAD ignores Range and answers the full-size headers" {
+	local -r size="$(stat -c '%s' "$REPO_ROOT/file/venise.webp")"
+	request '' 'HEAD /file/venise.webp HTTP/1.1' 'Host: localhost' 'Range: bytes=0-3'
+	[ "$(status_code)" = '200' ]
+	[ "$(header Content-Length)" = "$size" ]
+	[ -z "$(body)" ]
+}
+
 @test "a missing file is a 404" {
 	request '' 'GET /file/nope.txt HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]

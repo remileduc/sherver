@@ -108,6 +108,7 @@ function init_environment()
 	# Public: Generic HTTP response code with their meaning (associative array)
 	declare -rAg HTTP_RESPONSE=(
 		[200]='OK'
+		[206]='Partial Content'
 		[301]='Moved Permanently'
 		[302]='Found'
 		[304]='Not Modified'
@@ -117,6 +118,7 @@ function init_environment()
 		[405]='Method Not Allowed'
 		[413]='Content Too Large'
 		[414]='URI Too Long'
+		[416]='Range Not Satisfiable'
 		[431]='Request Header Fields Too Large'
 		[500]='Internal Server Error'
 		[501]='Not Implemented'
@@ -774,6 +776,14 @@ export -f _get_mimetype
 # Only a GET or a HEAD is answered that way: a 304 to a POST would leave the client
 # without a representation of what it just sent.
 #
+# Every answer also announces `Accept-Ranges: bytes`, and a GET carrying a single byte
+# range (`Range: bytes=0-499`, `bytes=500-`, `bytes=-500`) is answered with a
+# `206 Partial Content` and the matching `Content-Range` — what `<video>` seeking needs.
+# A range starting past the end of the file is a `416 Range Not Satisfiable`. Every
+# other form — several ranges, another unit, garbage — is ignored and the whole file is
+# served, as RFC 9110 §14.2 allows; so is the whole header when an `If-Range` is present
+# and is not exactly the current ETag.
+#
 # The path generally comes from the URL (`URL_BASE`). You just need to remove the first
 # `/` to get a relative path.
 #
@@ -841,11 +851,69 @@ function send_file()
 	local content_type
 	content_type=$(_get_mimetype "$file")
 	add_header 'Content-Type'   "$content_type";
-	add_header 'Content-Length' "$size"
-	_send_header 200
-	# response
-	if [ "$REQUEST_METHOD" != 'HEAD' ]; then
-		cat "$file"
+	# on the 200s as much as the 206s: this is what tells a video player seeking works
+	add_header 'Accept-Ranges' 'bytes'
+	# single byte range, on GET only (RFC 9110 §14.2 lets a HEAD ignore Range, and it keeps
+	# the full-size headers meaningful). `first` stays -1 unless a satisfiable range lands
+	local -i first=-1 last=-1
+	# anything unparseable — several ranges, another unit, garbage, a number too long for
+	# bash's 64-bit arithmetic — falls through to the full 200: §14.2 allows ignoring the
+	# header wholesale, so the full answer is always a correct one, never an error
+	if [ "$REQUEST_METHOD" = 'GET' ] \
+			&& [[ "${REQUEST_HEADERS['range']:-}" =~ ^bytes=([[:digit:]]*)-([[:digit:]]*)$ ]] \
+			&& [ -n "${BASH_REMATCH[1]}${BASH_REMATCH[2]}" ] \
+			&& [ "${#BASH_REMATCH[1]}" -le 18 ] && [ "${#BASH_REMATCH[2]}" -le 18 ]; then
+		# `10#` pins base ten: a client's leading zero would otherwise read as octal, and
+		# `bytes=08-` would die on an invalid constant. The 18-digits cap above keeps the
+		# conversion inside bash's arithmetic range
+		local -r from="${BASH_REMATCH[1]:+$(( 10#${BASH_REMATCH[1]} ))}"
+		local -r to="${BASH_REMATCH[2]:+$(( 10#${BASH_REMATCH[2]} ))}"
+		# a stale If-Range means the client's copy changed under it: it needs the whole
+		# file, not a piece of the new one. Exact string match, like the validators above
+		local -r if_range="${REQUEST_HEADERS['if-range']:-}"
+		if [ -z "$if_range" ] || [ "$if_range" = "$etag" ]; then
+			if [ -z "$from" ]; then
+				# `-N` is the last N bytes, the whole file when N overshoots it
+				if [ "$to" -gt 0 ] && [ "$size" -gt 0 ]; then
+					first=$(( size > to ? size - to : 0 ))
+					last=$(( size - 1 ))
+				else
+					# the last zero bytes, or any tail of an empty file, selects nothing
+					# (RFC 9110 §14.1.2); §15.3.7 wants the full size in the answer
+					add_header 'Content-Range' "bytes */$size"
+					send_error 416
+				fi
+			elif [ -n "$to" ] && [ "$from" -gt "$to" ]; then
+				: # first past last is no range at all: ignored, the 200 below answers
+			elif [ "$from" -ge "$size" ]; then
+				# the one unsatisfiable int-range form: it starts past the end
+				add_header 'Content-Range' "bytes */$size"
+				send_error 416
+			else
+				first="$from"
+				# an open or overshooting end stops where the file does (RFC 9110 §14.1.2)
+				if [ -z "$to" ] || [ "$to" -ge "$size" ]; then
+					last=$(( size - 1 ))
+				else
+					last="$to"
+				fi
+			fi
+		fi
+	fi
+	if [ "$first" -ge 0 ]; then
+		local -ri length=$(( last - first + 1 ))
+		add_header 'Content-Range' "bytes $first-$last/$size"
+		add_header 'Content-Length' "$length"
+		_send_header 206
+		# no `pipefail` here, so `tail` dying of SIGPIPE once `head` has enough is inert
+		tail -c "+$(( first + 1 ))" -- "$file" | head -c "$length"
+	else
+		add_header 'Content-Length' "$size"
+		_send_header 200
+		# response
+		if [ "$REQUEST_METHOD" != 'HEAD' ]; then
+			cat "$file"
+		fi
 	fi
 	log_debug '================================================'
 	exit 0
