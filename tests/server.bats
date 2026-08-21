@@ -71,7 +71,7 @@ function teardown_file()
 @test "a real client is answered" {
 	run curl -ks -i "$SHERVER_URL/"
 	[ "$status" -eq 0 ]
-	[[ "${lines[0]}" == 'HTTP/1.0 200 OK'* ]]
+	[[ "${lines[0]}" == 'HTTP/1.1 200 OK'* ]]
 	[[ "$output" == *'<h1>Sherver example</h1>'* ]]
 }
 

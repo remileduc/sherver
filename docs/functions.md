@@ -39,11 +39,11 @@ Use it for what is worth keeping on a busy server: errors, and the one line per 
 
 Examples
 
-     log "> HTTP/1.0 200 OK
+     log "> HTTP/1.1 200 OK
 
 will output
 
-     > HTTP/1.0 200 OK
+     > HTTP/1.1 200 OK
 
 
 `log_debug()`
@@ -154,7 +154,7 @@ Public: Add header for the response.
 
 Takes 2 parameters: header name and header content.
 
-* $1 - header name, one of the HTTP 1.0 standard value
+* $1 - header name, one of the HTTP 1.1 standard value
 * $2 - value of the header
 
 Examples
@@ -183,17 +183,16 @@ Examples
 
 will result in:
 
-     HTTP/1.0 200 OK
+     HTTP/1.1 200 OK
      Date: Thu, 04 Jul 2019 21:38:23 GMT
      Server: Sherver
      Cache-Control: private, max-age=60
-     Expires: Thu, 04 Jul 2019 21:38:23 GMT
 
 
 `send_response()`
 -----------------
 
-Public: Send the given answer in a HTTP 1.0 format.
+Public: Send the given answer in a HTTP 1.1 format.
 
 Takes the response code as first parameter, then as many parameters as needed to write the answer. They will be sent, separated by newlines.
 
@@ -217,7 +216,7 @@ will send something like (depends on your default headers, see `RESPONSE_HEADERS
 
 ```
 
-     HTTP/1.0 200 OK
+     HTTP/1.1 200 OK
      Content-Type: text/plain
 
      this is some
@@ -232,6 +231,8 @@ Public: Send the given error as an answer.
 
 Takes one parameter: the error code. It will be sent as an answer, along with a very small HTML explaining what is the error.
 
+The answer is `Cache-Control: no-store` and carries none of the cache validators that may already have been set: this page is not the representation they describe, and several of these codes are triggered by a request header that nothing nominates in a `Vary`.
+
 * $1 - the error code, see `HTTP_RESPONSE`
 
 Examples
@@ -240,7 +241,8 @@ Examples
 
 will create an answer that starts with
 
-     HTTP/1.0 404 Not Found
+     HTTP/1.1 404 Not Found
+     Cache-Control: no-store
 
 
 `send_redirect()`
@@ -248,7 +250,7 @@ will create an answer that starts with
 
 Public: Send a redirect to the given URL as an answer.
 
-Takes the target URL, and optionally the response code: 302 (the default) for a temporary redirect, 301 for a permanent one — the two redirects HTTP 1.0 defines. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
+Takes the target URL, and optionally the response code: 302 (the default) for a temporary redirect, 301 for a permanent one — the two redirects `HTTP_RESPONSE` knows. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
 
 The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form.
 
@@ -265,7 +267,7 @@ Examples
 
 will send an answer that starts with
 
-     HTTP/1.0 302 Found
+     HTTP/1.1 302 Found
      Location: /index.sh
 
 
@@ -331,6 +333,8 @@ Every answer carries two cache validators: an `ETag` built from the size and mti
 
 Only a GET or a HEAD is answered that way: a 304 to a POST would leave the client without a representation of what it just sent.
 
+Every answer also announces `Accept-Ranges: bytes`, and a GET carrying a single byte range (`Range: bytes=0-499`, `bytes=500-`, `bytes=-500`) is answered with a `206 Partial Content` and the matching `Content-Range` — what `<video>` seeking needs. A range starting past the end of the file is a `416 Range Not Satisfiable`. Every other form — several ranges, another unit, garbage — is ignored and the whole file is served, as RFC 9110 §14.2 allows; so is the whole header when an `If-Range` is present and is not exactly the current ETag.
+
 The path generally comes from the URL (`URL_BASE`). You just need to remove the first `/` to get a relative path.
 
 *Note* that to find the correct mimetype, we use `_get_mimetype()`, which deduces it from the extension of the file.
@@ -344,7 +348,7 @@ Examples
 
 if the file exist, will send a response that starts with (assuming file size is 4 kio)
 
-     HTTP/1.0 200 OK
+     HTTP/1.1 200 OK
      Content-Type: image/png
      Content-Length: 4096
 
@@ -376,6 +380,24 @@ will do the following
      './index.sh' '/index.sh?dummy=stuff'
 
 
+`_bail_request()`
+-----------------
+
+Internal: Log a request parse failure, dump the request when relevant, and answer an error.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse only (a child script re-parse would dump it once per script), the reason is always `log`ged, and `send_error()` ends the process — this function never returns. Only for the bail-outs *before* the end of the header loop: after that point, the first parse has already dumped the full request unconditionally, and this would dump it a second time.
+
+* $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
+* $2 - the reason, `log`ged as is
+* $3 - true when parsing from the standard input, false in a child script re-parse
+
+Examples
+
+     _bail_request 400 'BAD REQUEST: malformed request line' true
+
+
 `read_request()`
 ----------------
 
@@ -393,6 +415,8 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 * `REQUEST_URL`
 * `URL_BASE`
 * `URL_PARAMETERS`
+
+An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — replaces `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
 
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 

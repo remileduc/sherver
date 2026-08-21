@@ -19,12 +19,12 @@ set -efu
 
 init_environment
 
+# no 405 arm: this endpoint serves every method `SUPPORTED_METHODS` lets through, OPTIONS
+# being answered by the dispatcher. An endpoint that doesn't, like `page.sh`, needs one
 if [ "$REQUEST_METHOD" = 'POST' ]; then
 	add_header 'Content-Type' 'text/plain'
 	send_response 200 "You just sent me '$REQUEST_BODY'!
 	How kind of you <3"
-elif [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
-	send_error 405
 fi
 
 all_params=''

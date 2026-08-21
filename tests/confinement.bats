@@ -24,17 +24,17 @@ load 'test_helper'
 # Internal: Check that the given URL is refused, and that the refusal leaks nothing.
 function refuses()
 {
-	request '' "GET $1 HTTP/1.0"
+	request '' "GET $1 HTTP/1.1" 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 	# a 403 would confirm the target exists, and the body must not name it either
-	[ "$(status_line)" = 'HTTP/1.0 404 Not Found' ]
+	[ "$(status_line)" = 'HTTP/1.1 404 Not Found' ]
 	[[ "$(body)" != *"$REPO_ROOT"* ]]
 }
 
 # Internal: Check that the given URL is served with a 200.
 function serves()
 {
-	request '' "GET $1 HTTP/1.0"
+	request '' "GET $1 HTTP/1.1" 'Host: localhost'
 	[ "$(status_code)" = '200' ]
 }
 
@@ -66,6 +66,14 @@ function teardown()
 	# not to exist under `scripts/`
 	[[ "$(log_output)" == *'FORBIDDEN: absolute path'* ]]
 	refuses '/file//etc/passwd'
+}
+
+@test "an escape hidden in an absolute-form target is refused" {
+	# the target is rewritten to its path before anything resolves it, so it lands in the
+	# same check as an origin form — the authority is no way around it
+	refuses 'http://example.com/file/../dispatcher.sh'
+	refuses 'https://example.com/../../etc/passwd'
+	refuses 'http://example.com//etc/passwd'
 }
 
 @test "a percent encoded escape is refused" {
@@ -114,7 +122,7 @@ function teardown()
 	local url
 	for url in '/file/../dispatcher.sh' '/../etc/passwd' '/file/nope' '/nope.sh' \
 		'/templates/template.html' '/page.sh?page=../../LICENSE'; do
-		request '' "GET $url HTTP/1.0"
+		request '' "GET $url HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" != '403' ]
 	done
 }

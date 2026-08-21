@@ -23,8 +23,15 @@ source 'scripts/SHERVER_UTILS.sh'
 
 init_environment
 
+# answer OPTIONS for the whole server, before any path resolution: that is what makes the
+# asterisk-form `OPTIONS * HTTP/1.1` work, as `*` is no path and would only ever 404
+if [ "$REQUEST_METHOD" = 'OPTIONS' ]; then
+	add_header 'Allow' "$SUPPORTED_METHODS"
+	# 200 with an empty body and not 204: a 204 MUST NOT carry the `Content-Length`
+	# that `send_response` adds to everything but a 304
+	send_response 200
 # serve file
-if [[ $URL_BASE =~ ^/file/.* ]]; then
+elif [[ $URL_BASE =~ ^/file/.* ]]; then
 	send_file "${URL_BASE:1}"
 # run script
 # special case for root

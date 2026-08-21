@@ -218,7 +218,8 @@ function check_tomdoc()
 }
 
 # Internal: `send_error` looks the code up in `HTTP_RESPONSE` under `set -u`, so an
-# unknown one kills the script mid-answer instead of producing an error page.
+# unknown one — sent directly or through `_bail_request` — kills the script mid-answer
+# instead of producing an error page.
 function check_error_codes()
 {
 	local -A known=()
@@ -229,8 +230,8 @@ function check_error_codes()
 	local -a unknown=()
 	while read -r code; do
 		[ -v "known[$code]" ] || unknown+=("$code")
-	done < <(grep -rhoP 'send_error \K[0-9]+' -- "${SOURCE_FILES[@]}" | sort -u)
-	report "sent by send_error but absent from HTTP_RESPONSE:" "${unknown[@]}"
+	done < <(grep -rhoP '(send_error|_bail_request) \K[0-9]+' -- "${SOURCE_FILES[@]}" | sort -u)
+	report "sent by send_error or _bail_request but absent from HTTP_RESPONSE:" "${unknown[@]}"
 }
 
 # Internal: Anything executable under `scripts/` is a reachable HTTP endpoint, so the

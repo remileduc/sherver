@@ -21,19 +21,21 @@ The dispatcher runs from the root, so we take the current directory. It is then 
 `REQUEST_METHOD`
 ----------------
 
-Public: The method of the request (GET, HEAD, POST...)
+Public: The method of the request (one of GET, HEAD, POST and OPTIONS)
 
 `REQUEST_URL`
 -------------
 
-Public: The requested URL
+Public: The requested URL, always as a path (`*` alone for an asterisk-form `OPTIONS`)
+
+An absolute-form target (`GET http://host/path`, the form a proxy sends) is rewritten by `read_request()` to the path it points at, and any other non-path target is a 400, so scripts never see a scheme or a host.
 
 `REQUEST_HTTP_VERSION`
 ----------------------
 
 Public: The HTTP version the client announced (`HTTP/1.0`, `HTTP/1.1`...)
 
-Informative only: the answer is always in HTTP 1.0.
+`read_request()` rejects anything that is not `HTTP/1.x` (400 when unparseable, 505 on another major version), so scripts only ever see 1.x here. The answer is always in HTTP 1.1 (RFC 9112 §2.3 — the version in the response advertises capability, so answering 1.1 to a 1.0 client is correct).
 
 `REQUEST_HEADERS`
 -----------------
@@ -73,6 +75,13 @@ Public: The response headers (associative array)
 ---------------
 
 Public: Generic HTTP response code with their meaning (associative array)
+
+`SUPPORTED_METHODS`
+-------------------
+
+Public: The methods the server accepts, as an `Allow` header value
+
+`read_request()` tests the request method against it and sends it with its 405, and the dispatcher answers `OPTIONS` with it, so adding a method here cannot leave a stale `Allow` behind. A single script advertises its own list instead, `Allow` being a property of the target resource and not of the server (RFC 9110 §10.2.1).
 
 `MAX_BODY_SIZE`
 ---------------

@@ -19,7 +19,7 @@ set -efu
 
 cd "$(dirname "$0")"
 
-declare -r SHERVER_VERSION='1.0'
+declare -r SHERVER_VERSION='1.1'
 
 # the environment is the only thing the dispatcher and the scripts it runs inherit from us
 if [ "${1:-}" = '--debug' ]; then
@@ -61,8 +61,12 @@ esac
 
 printf 'Sherver %s started, listening on %s\n' "$SHERVER_VERSION" "${1:-8080}" >&2
 
-# -T: drop a connection that goes silent, so a client can't pin a forked child forever
-# exec: socat replaces us, so systemd tracks and signals it instead of a bash wrapper
+
 # IFS joins the array into socat's one comma-separated argument, and dies with the exec
 IFS=','
-exec socat -T 10 "${socat_options[*]}" EXEC:'./dispatcher.sh'
+# exec: socat replaces us, so systemd tracks and signals it instead of a bash wrapper
+exec socat \
+	`# -T: drop a connection that goes silent, so a client can't pin a forked child forever` \
+	-T 10 \
+	"${socat_options[*]}" \
+	EXEC:'./dispatcher.sh'

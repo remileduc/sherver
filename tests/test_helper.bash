@@ -45,7 +45,7 @@ declare -g RESPONSE_LOG=''
 #
 # Examples
 #
-#    request_raw $'GET / HTTP/1.0\r\n\r\n'
+#    request_raw $'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n'
 function request_raw()
 {
 	RESPONSE="$BATS_TEST_TMPDIR/response"
@@ -64,8 +64,8 @@ function request_raw()
 #
 # Examples
 #
-#    request '' 'GET /index.sh?a=1 HTTP/1.0' 'Host: localhost'
-#    request 'a=1&b=2' 'POST / HTTP/1.0' 'Content-Length: 7'
+#    request '' 'GET /index.sh?a=1 HTTP/1.1' 'Host: localhost'
+#    request 'a=1&b=2' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 7'
 function request()
 {
 	local -r body="$1"
@@ -153,7 +153,7 @@ function log_output()
 #
 # Examples
 #
-#    run --separate-stderr with_request 'GET /index.sh?a=b HTTP/1.0' 'echo "$URL_BASE"'
+#    run --separate-stderr with_request $'GET /index.sh?a=b HTTP/1.1\nHost: localhost' 'echo "$URL_BASE"'
 function with_request()
 {
 	( cd -- "$REPO_ROOT" && bash -c "source '$LIBRARY'; init_environment; $2" ) <<< "$1"

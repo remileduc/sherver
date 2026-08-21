@@ -68,7 +68,8 @@ version and exits; [CHANGELOG.md](./CHANGELOG.md) says what each one brought.
 This is made to run with `Bash`. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
-- `date`, `realpath`, `stat` and `cat` — from `coreutils` on a GNU system, but busybox's versions are enough (see below)
+- `date`, `realpath`, `stat`, `cat` and — to answer a byte range — `tail` and `head`: from `coreutils`
+	on a GNU system, but busybox's versions are enough (see below)
 - optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base` in Debian, or something like `gettext-envsubst` as a smaller package in Alpine)
 - for development: `bats` and `shellcheck` for the tests. The two suites that open a port also want
 	`curl`, and the HTTPS one uses `openssl` to generate itself a throwaway certificate, falling back on
@@ -77,22 +78,25 @@ This is made to run with `Bash`. It may not work in another shell. The following
 [docs/call-graph.md#external-commands](./docs/call-graph.md#external-commands) lists which function calls which of
 these tools.
 
-On a busybox system such as an Alpine container, `coreutils` is not needed: `date -uR`, `stat -c` and
-`cat` are all covered by busybox, and `realpath` is called without any option precisely so that
-busybox's — which parses none — is enough. Only `bash`, `socat` and — because the default index page
-templates itself with it — `envsubst` have to come from packages.
+On a busybox system such as an Alpine container, `coreutils` is not needed: `date -uR`, `stat -c`,
+`cat` and the `tail -c +N | head -c N` of a range answer are all covered by busybox, and `realpath` is
+called without any option precisely so that busybox's — which parses none — is enough. Only `bash`,
+`socat` and — because the default index page templates itself with it — `envsubst` have to come from
+packages.
 
 ### Features ###
 
-Sherver is a web server that implements part of HTTP 1.0. Even if it is written in a few lines of Bash, it is able to do a lot:
+Sherver is a web server that implements part of HTTP 1.1. Even if it is written in a few lines of Bash, it is able to do a lot:
 - no configuration needed: you can just add files either in `scripts` or in `file` folders
 - serve any HTML page no matter how complexe (with advanced JavaScript and multiple scripts or files to download...)
 - serve files (text or binary, pictures...) with correct mime type
 - dynamic pages
 - templated HTML so you don't have to duplicate headers and footers
-- parse of URL query string, percent decoded (so `/file/my%20file.txt` finds `my file.txt`)
-- support for GET, HEAD and POST
+- parse of URL query string, percent decoded (so `/file/my%20file.txt` finds `my file.txt`), in
+  origin form as in absolute form (`GET http://host/path HTTP/1.1`)
+- support for GET, HEAD, POST and OPTIONS
 - deal with client cache resources
+- serve a file by byte range, so a `<video>` can be seeked in (and plays at all in Safari)
 - easily extandable
 	- can run any scripts or executable of any languages as soon as they output something on `stdout`
 	- comes with a library of bash functions to ease the use
@@ -100,13 +104,22 @@ Sherver is a web server that implements part of HTTP 1.0. Even if it is written 
 All of these makes Sherver the perfect tool to run a small server that will serve few pages on your local network.
 
 Even if it sounds awesome, Sherver still has the following limitations:
-- only support HTTP GET, HEAD and POST requests, though it would be easy to add the others
+- only support HTTP GET, HEAD, POST and OPTIONS requests, though it would be easy to add the others:
+  `PUT`, `DELETE`, `PATCH`, `TRACE` and `CONNECT` get a `405` carrying an `Allow` header, and
+  anything else a `501`
 - concurrency is capped at 32 connections: `socat` forks one process per connection and makes the
   next ones wait for a free slot, so a burst queues instead of thrashing the machine
-- no keep alive: this is HTTP 1.0 with `Connection: close`, so one request per connection
+- no keep alive, and none planned: every response carries `Connection: close`, so it is one request
+  per connection. RFC 9112 §9.6 makes that a compliant way out of persistent connections, and it is
+  what lets `socat` fork one short-lived process per connection with nothing shared between them
 - no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
 - the request line and headers are limited to 8 kio, bigger ones get a `414` or a `431` answer
+- a chunked request body is read as no body at all, where it should get a `411`, and
+  `Expect: 100-continue` is not answered — a client that waits for it eats socat's timeout and sends
+  anyway. No common client does either unprompted
+- the header parser is naive: a line without a colon, whitespace before the colon, a folded line, a
+  duplicated `Host` or `Content-Length` are all accepted where the RFC asks for a `400`
 - no security (see [About Security](#about-security)).
 
 This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and scalability (like *nginx* or other).
@@ -214,7 +227,9 @@ the requests in a text format:
 #!/bin/bash
 
 init_environment
+# `OPTIONS` is advertised but not tested: the dispatcher answers it before routing
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
+	add_header 'Allow' 'GET, HEAD, OPTIONS'
 	send_error 405
 fi
 
@@ -253,7 +268,9 @@ And you would use it with the following script:
 #!/bin/bash
 
 init_environment
+# `OPTIONS` is advertised but not tested: the dispatcher answers it before routing
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
+	add_header 'Allow' 'GET, HEAD, OPTIONS'
 	send_error 405
 fi
 
