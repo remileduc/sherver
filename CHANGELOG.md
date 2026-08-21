@@ -44,7 +44,7 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
   it back on an answer of your own
 - `HTTP_RESPONSE` gains the codes that go with all this: `206`, `416`, `501`, `505`
 - `tail` and `head` join the external commands, for range answers only — busybox's are enough
-- add support for redirections 301/302
+- add support for redirections 30X
 - add support for `Last-Modified` header
 - add IP in logs
 

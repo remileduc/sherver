@@ -157,6 +157,18 @@ ko %g0' ]
 	[[ $output == 'HTTP/1.1 301 Moved Permanently'* ]]
 }
 
+@test "send_redirect knows the HTTP/1.1 redirects too" {
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 303'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.1 303 See Other'* ]]
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 307'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.1 307 Temporary Redirect'* ]]
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 308'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.1 308 Permanent Redirect'* ]]
+}
+
 @test "send_redirect refuses a code that is not a redirect" {
 	# an unknown code would kill send_response mid-answer, leaving the client nothing
 	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 404'
