@@ -25,6 +25,11 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
   `505`
 - **`Host` is mandatory** on an HTTP/1.1 request, missing it is a `400`. An HTTP/1.0 request
   without `Host` stays legal
+- **header lines are validated**: a folded line (obs-fold), a line without a colon, a field name that
+  is not a token — whitespace before the colon included — and a repeated `Host` or `Content-Length`
+  carrying two different values are all a `400` now (RFC 9112 §5, §5.1, §5.2, §3.2 and §6.3). Any
+  other repeated header reaches `REQUEST_HEADERS` as the `v1, v2` list it stands for (RFC 9110 §5.2)
+  instead of the last value alone
 - **byte ranges**: every file answer announces `Accept-Ranges: bytes`, and a GET carrying a single
   `Range: bytes=…` gets a `206` with its `Content-Range`. A range starting past the end of the file
   is a `416`; a stale `If-Range`, several ranges, another unit or plain garbage are ignored and the
@@ -56,8 +61,8 @@ Deliberately left out, and worth knowing about:
   client sends one unprompted
 - **`Expect: 100-continue`** is not answered: a client that waits for the interim response eats
   socat's timeout and sends anyway
-- the **header parser is still naive**: a line without a colon, whitespace before the colon, a
-  folded line, a duplicated `Host` or `Content-Length` — none of them are rejected
+- a header **value** is taken as it comes: only the field name is validated, and a value is checked
+  where it is read (`Content-Length`, `Range`) or not at all
 
 1.0 — 2026-08-14
 ----------------

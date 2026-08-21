@@ -85,6 +85,9 @@ function init_environment()
 	#
 	# The keys are lowercase, because HTTP header names are case insensitive:
 	# use `REQUEST_HEADERS['content-type']`, not `REQUEST_HEADERS['Content-Type']`.
+	#
+	# A header the client repeated is here as the `v1, v2` list it stands for (RFC 9110 §5.2),
+	# except for `Host` and `Content-Length`: two different values there are a 400.
 	declare -Ag REQUEST_HEADERS
 	# Public: Body of the request (mainly useful for POST)
 	declare -g REQUEST_BODY=''
@@ -1026,6 +1029,11 @@ export -f _bail_request
 # `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400,
 # the asterisk form of `OPTIONS` excepted.
 #
+# A header line is refused with a 400 when it is folded (obs-fold), has no colon, or has a
+# name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2).
+# A repeated header becomes the `v1, v2` list of RFC 9110 §5.2, but a repeated `Host` or
+# `Content-Length` with two different values is a 400: they frame the request.
+#
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 #
 # $1 - true when parsing from the standard input, false when re-parsing
@@ -1123,7 +1131,7 @@ function read_request()
 	parse_url "$REQUEST_URL"
 
 	# fill REQUEST_HEADERS
-	local key value
+	local key name value
 	while read -r line; do
 		# checked first, for the same reasons as the request line above
 		if [ $(( ${#REQUEST_FULL_STRING} + ${#line} + 1 )) -gt "$MAX_HEADERS_SIZE" ]; then
@@ -1136,13 +1144,42 @@ function read_request()
 		fi
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 $line"
-		IFS=$': \t' read -r key value <<< "$line"
-		# an empty name is a fatal `bad array subscript`, and only a broken client sends one
-		if [ -z "$key" ]; then
-			_bail_request 400 'BAD REQUEST: header line without a name' "$1"
+		# RFC 9112 §5.2: a line starting with whitespace is an obs-fold continuation, which a
+		# server must reject or splice. Rejecting is the honest half — spliced, it would have
+		# to be re-split here and re-folded in `REQUEST_FULL_STRING` for the child re-parse
+		if [[ "$line" == [[:space:]]* ]]; then
+			_bail_request 400 'BAD REQUEST: obsolete line folding in the headers' "$1"
 		fi
-		# header names are case insensitive, so we normalize them to lowercase
-		REQUEST_HEADERS["${key,,}"]="$value"
+		key="${line%%:*}"	# cut out of the raw line: the `read` below eats what we refuse
+		# RFC 9112 §5: a field line is `name ":" OWS value OWS`, so with no colon there is no
+		# field at all — and a bare `Host` line used to satisfy the presence check below
+		if [ "$key" = "$line" ]; then
+			_bail_request 400 "BAD REQUEST: header line without a colon: '$line'" "$1"
+		fi
+		# a field name is a token (RFC 9110 §5.6.2), so this one test covers the whitespace
+		# before the colon that RFC 9112 §5.1 MUSTs out (a request smuggling vector: a proxy
+		# that trimmed it instead would forward a header we never saw), the empty name that is
+		# a fatal `bad array subscript`, and any stray octet
+		if [[ ! "$key" =~ $tchar ]]; then
+			_bail_request 400 "BAD REQUEST: invalid header name '$key'" "$1"
+		fi
+		name="${key,,}"	# header names are case insensitive
+		IFS=$' \t' read -r value <<< "${line#*:}"	# strips the OWS, and only the OWS
+		# the subscripts are quoted throughout: a field name may legally be `*` or `@` (both
+		# are tchar), and unquoted those two would read as every element of the array
+		if [ ! -v "REQUEST_HEADERS[\"$name\"]" ]; then
+			REQUEST_HEADERS["$name"]="$value"
+		elif [ "$name" != 'host' ] && [ "$name" != 'content-length' ]; then
+			# RFC 9110 §5.2: a repeated field is the comma-separated list it stands for.
+			# Overwriting instead would drop what the client sent, and a list-valued header
+			# we compare as a whole (`If-None-Match`...) then merely degrades to a full answer
+			REQUEST_HEADERS["$name"]="${REQUEST_HEADERS["$name"]}, $value"
+		elif [ "${REQUEST_HEADERS["$name"]}" != "$value" ]; then
+			# neither of those two is a list: two `Host` values make the target ambiguous
+			# (RFC 9112 §3.2) and two `Content-Length` values the body framing (§6.3) — the
+			# request smuggling pair. Repeated identical values are unambiguous, so they pass
+			_bail_request 400 "BAD REQUEST: conflicting '$key' headers" "$1"
+		fi
 	done
 	if [ "$1" = true ]; then
 		log_debug "$REQUEST_FULL_STRING"
@@ -1154,7 +1191,8 @@ $line"
 		REQUEST_HEADERS['host']="$authority"
 	fi
 	# RFC 9112: §3.2 requires Host on 1.1, and §2.3 processes a higher 1.x minor as 1.1, so
-	# only 1.0 is exempt. Presence only: value unused (same tree served), duplicates overwrite
+	# only 1.0 is exempt. Presence only: the value is unused, the same tree being served
+	# whatever the authority — the header loop above is what makes it unambiguous
 	if [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
 		log "BAD REQUEST: $REQUEST_HTTP_VERSION request without a Host header"
 		send_error 400

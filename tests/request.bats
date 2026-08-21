@@ -367,6 +367,82 @@ X-MiXeD-CaSe: yes' \
 	[ "$output" = 'yes' ]
 }
 
+@test "the OWS around a header value is stripped, the whitespace inside is kept" {
+	run --separate-stderr with_request \
+		"GET / HTTP/1.1
+Host: localhost
+X-Foo:$(printf '\t') two  words  " \
+		'printf "[%s]\n" "${REQUEST_HEADERS[x-foo]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '[two  words]' ]
+}
+
+@test "whitespace before the colon is a 400" {
+	# RFC 9112 §5.1 makes it a MUST: a proxy that trims it instead would forward a header
+	# this server never saw, which is a request smuggling vector
+	local header
+	for header in 'X-Foo : bar' $'X-Foo\t: bar' 'Host : localhost'; do
+		request '' 'GET / HTTP/1.1' 'Host: localhost' "$header"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "a header line without a colon is a 400" {
+	# RFC 9112 §5. A bare `Host` line used to parse as a header named `host`, and so to
+	# satisfy the presence check on its own
+	local header
+	for header in 'Host' 'X-Nonsense' 'garbage'; do
+		request '' 'GET / HTTP/1.1' "$header"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "a header name that is not a token is a 400" {
+	local header
+	for header in 'X(Foo): bar' 'X-Fo o: bar' '"X-Foo": bar'; do
+		request '' 'GET / HTTP/1.1' 'Host: localhost' "$header"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "a folded header line is a 400" {
+	# obs-fold (RFC 9112 §5.2): refused, not spliced
+	local continuation
+	for continuation in ' continued' $'\tcontinued'; do
+		request '' 'GET / HTTP/1.1' 'Host: localhost' 'X-Foo: bar' "$continuation"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "a repeated header is the list it stands for" {
+	# RFC 9110 §5.2. Overwriting instead would drop what the client sent
+	run --separate-stderr with_request \
+		'GET / HTTP/1.1
+Host: localhost
+X-Foo: a
+x-foo: b
+X-FOO: c' \
+		'printf "%s\n" "${REQUEST_HEADERS[x-foo]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = 'a, b, c' ]
+}
+
+@test "two different Host or Content-Length values are a 400" {
+	# neither is a list: they frame the request, and an ambiguous framing is the request
+	# smuggling pair (RFC 9112 §3.2 and §6.3). The second name proves the case folding
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'HOST: example.com'
+	[ "$(status_code)" = '400' ]
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' 'Content-Length: 4'
+	[ "$(status_code)" = '400' ]
+}
+
+@test "a header repeated with the same value is unambiguous" {
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' 'Content-Length: 5'
+	[ "$(status_code)" = '200' ]
+}
+
 @test "every response carries the default headers" {
 	request '' 'GET / HTTP/1.1' 'Host: localhost'
 	[ "$(header Server)" = 'Sherver' ]

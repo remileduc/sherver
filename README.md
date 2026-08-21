@@ -118,8 +118,8 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - a chunked request body is read as no body at all, where it should get a `411`, and
   `Expect: 100-continue` is not answered — a client that waits for it eats socat's timeout and sends
   anyway. No common client does either unprompted
-- the header parser is naive: a line without a colon, whitespace before the colon, a folded line, a
-  duplicated `Host` or `Content-Length` are all accepted where the RFC asks for a `400`
+- header *values* are taken as they come: only the field name is validated, and a value is checked
+  where it is read (`Content-Length`, `Range`) or not at all
 - no security (see [About Security](#about-security)).
 
 This is why Sherver is supposed to remain in a private and controlled environment. **Do not expose Sherver on Internet!!!** If you want to expose your site on Internet, you should use a tool that knows about security and scalability (like *nginx* or other).

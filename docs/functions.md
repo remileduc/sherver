@@ -418,6 +418,8 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 
 An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — replaces `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
 
+A header line is refused with a 400 when it is folded (obs-fold), has no colon, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2, but a repeated `Host` or `Content-Length` with two different values is a 400: they frame the request.
+
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 
 * $1 - true when parsing from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so that a request is not dumped once per script it goes through
