@@ -289,9 +289,11 @@ authority.example' ]
 	[ "$(status_code)" = '400' ]
 }
 
-@test "a header line without a name is a 400, not a crash" {
+@test "an empty header name is a 400, not a crash" {
+	# an empty name is a fatal `bad array subscript`, so it must never reach the array.
+	# The tab-indented form of this is a folded line, and belongs to the obs-fold test
 	local header
-	for header in ': naughty' ':naughty' $'\t: naughty'; do
+	for header in ': naughty' ':naughty'; do
 		request '' 'GET / HTTP/1.1' 'Host: localhost' "$header"
 		[ "$(status_code)" = '400' ]
 	done
@@ -398,20 +400,41 @@ X-Foo:$(printf '\t') two  words  " \
 }
 
 @test "a header name that is not a token is a 400" {
+	# the last one is not ASCII: `tchar` is (RFC 9110 §5.6.2), so a `[[:alnum:]]` class
+	# would take it under the `LC_ALL=C.UTF-8` of the dispatcher and disagree with any
+	# proxy in front that enforces the real grammar
 	local header
-	for header in 'X(Foo): bar' 'X-Fo o: bar' '"X-Foo": bar'; do
+	for header in 'X(Foo): bar' 'X-Fo o: bar' '"X-Foo": bar' 'X-Foé: bar'; do
 		request '' 'GET / HTTP/1.1' 'Host: localhost' "$header"
 		[ "$(status_code)" = '400' ]
 	done
 }
 
 @test "a folded header line is a 400" {
-	# obs-fold (RFC 9112 §5.2): refused, not spliced
+	# obs-fold (RFC 9112 §5.2): refused, not spliced. The third one carries a colon, so a
+	# de-fold would turn it into a header of its own — a proxy that splices per §5.2 sends
+	# one `X-Foo: bar Evil: injected` and the two ends stop agreeing on the header set.
+	# The last two are whitespace only, which must not read as the empty line that ends
+	# the headers and drop everything behind it, `Content-Length` included
 	local continuation
-	for continuation in ' continued' $'\tcontinued'; do
+	for continuation in ' continued' $'\tcontinued' ' Evil: injected' ' ' $'\t'; do
 		request '' 'GET / HTTP/1.1' 'Host: localhost' 'X-Foo: bar' "$continuation"
 		[ "$(status_code)" = '400' ]
 	done
+}
+
+@test "a header name is stored as data, never expanded" {
+	# the presence test used to build the subscript as a string that `[` re-expands, and a
+	# backquote and a `$` are both tchar: this request ran `mktemp` twice — once in the
+	# dispatcher, once in the child re-parse — and answered 200 as if nothing happened
+	export TMPDIR="$BATS_TEST_TMPDIR"
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'X-`mktemp`: v'
+	[ "$(status_code)" = '200' ]
+	[ "$(find "$BATS_TEST_TMPDIR" -maxdepth 1 -name 'tmp.*' | wc -l)" = '0' ]
+	# the `$` form aborted the dispatcher under `set -u` instead, sending zero bytes: no
+	# status line at all, which is why this asserts the code and not just the absence of a file
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'X-$NOPEVAR: v'
+	[ "$(status_code)" = '200' ]
 }
 
 @test "a repeated header is the list it stands for" {
@@ -427,13 +450,53 @@ X-FOO: c' \
 	[ "$output" = 'a, b, c' ]
 }
 
-@test "two different Host or Content-Length values are a 400" {
-	# neither is a list: they frame the request, and an ambiguous framing is the request
+@test "a repeated Cookie recombines on its own separator" {
+	# RFC 9113 §8.2.3: an HTTP/2 hop may split `Cookie`, and its pairs rejoin on `; `,
+	# never on the comma of the generic list — which would corrupt the cookie string
+	run --separate-stderr with_request \
+		'GET / HTTP/1.1
+Host: localhost
+Cookie: a=1
+Cookie: b=2' \
+		'printf "%s\n" "${REQUEST_HEADERS[cookie]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = 'a=1; b=2' ]
+}
+
+@test "an empty value never enters a merged header list" {
+	# RFC 9110 §5.6.1: an empty list element is ignorable, and storing one would make a
+	# `, b` or `a, ` no single-line request can produce
+	run --separate-stderr with_request \
+		'GET / HTTP/1.1
+Host: localhost
+X-Foo:
+X-Foo: b
+X-Foo:' \
+		'printf "%s\n" "${REQUEST_HEADERS[x-foo]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = 'b' ]
+}
+
+@test "two different Host, Content-Length or Content-Type values are a 400" {
+	# none is a list: they frame the request, and an ambiguous framing is the request
 	# smuggling pair (RFC 9112 §3.2 and §6.3). The second name proves the case folding
 	request '' 'GET / HTTP/1.1' 'Host: localhost' 'HOST: example.com'
 	[ "$(status_code)" = '400' ]
 	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' 'Content-Length: 4'
 	[ "$(status_code)" = '400' ]
+	# merged into a list, this one gets cut back at its first `;` where the body is parsed,
+	# so the media type read out of it depended on which value carried a parameter
+	request 'a=1&b=2' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 7' \
+		'Content-Type: application/x-www-form-urlencoded;charset=utf-8' \
+		'Content-Type: text/plain'
+	[ "$(status_code)" = '400' ]
+}
+
+@test "an absolute-form target ignores its Host headers, conflicting or not" {
+	# RFC 9112 §3.2.2: the authority of the target wins and the `Host` header MUST be
+	# ignored, so two of them are not the ambiguity the origin form makes them
+	request '' 'GET http://a.example/ HTTP/1.1' 'Host: one' 'Host: two'
+	[ "$(status_code)" = '200' ]
 }
 
 @test "a header repeated with the same value is unambiguous" {

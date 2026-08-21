@@ -70,6 +70,16 @@ a b' ]
 	[ "$output" = '[]' ]
 }
 
+@test "parse_url does not keep the parameters of a previous URL" {
+	# a child script may call it on a second URL in the same process: the request URL's
+	# keys must not survive into the second parse
+	run --separate-stderr with_request $'GET /index.sh?a=1 HTTP/1.1\nHost: localhost' \
+		'parse_url "/other?b=2"; printf "%s\n" "${#URL_PARAMETERS[@]}" "${URL_PARAMETERS[b]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '1
+2' ]
+}
+
 # ------------------------------------------------------- _check_encoding
 
 @test "_check_encoding accepts a properly encoded string" {
