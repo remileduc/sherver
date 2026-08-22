@@ -12,6 +12,7 @@ A version number says how stable the scripting API is — the library functions 
 must not be exposed on Internet, at 1.0 as at 0.1 (see
 [About security](./README.md#about-security)).
 
+
 1.1 — 2026-08-21
 ----------------
 
@@ -56,6 +57,15 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
   smuggling pair — is a `400`, and so is any value other than a lone `chunked`: no coding will
   ever be decoded here, so there is no `501` worth telling apart. A refused body is drained,
   bounded, before the error is sent, so the answer is not lost to a TCP reset
+- **`Expect: 100-continue` is answered** (RFC 9110 §10.1.1): the interim `HTTP/1.1 100 Continue`
+  line is written before the body is read, so a client that waits for it (curl does, on large
+  POSTs) no longer eats socat's timeout. A request refused before the body read gets its final
+  status instead, and an HTTP/1.0 client never gets the interim line
+- **an `Expect` naming anything but `100-continue` is a `417 Expectation Failed`**, on any
+  method: an expectation Sherver will never meet is refused right away instead of left to the
+  client's timeout. The value is a list, so a repeated `100-continue` is still met, and an
+  empty element names no expectation — an emptied value passes, like the emptied
+  `Transfer-Encoding`
 - `HTTP_RESPONSE` gains the codes that go with all this: `206`, `411`, `416`, `501`, `505`
 - `tail` and `head` join the external commands, for range answers only — busybox's are enough
 - add support for redirections 30X
@@ -68,8 +78,6 @@ Deliberately left out, and worth knowing about:
   (RFC 9112 §9.6), and one process per connection is the whole architecture
 - a **chunked request body** is refused with a `411` rather than decoded. No common client
   sends one unprompted
-- **`Expect: 100-continue`** is not answered: a client that waits for the interim response eats
-  socat's timeout and sends anyway
 - a header **value** is taken as it comes: only the field name is validated, and a value is checked
   where it is read (`Content-Length`, `Range`) or not at all
 

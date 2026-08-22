@@ -506,11 +506,15 @@ A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Leng
 
 A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
 
+A client that announced `Expect: 100-continue` (RFC 9110 §10.1.1) is holding the body back, so the interim `HTTP/1.1 100 Continue` line is written right before the body read. Every refusal above it answers with a final status instead — the alternative the same section allows. No interim line goes to an HTTP/1.0 client (a MUST NOT), whose expectation is ignored. `Expect` is a list, and naming anything but `100-continue` in it is a `417 Expectation Failed`, on any method (a MAY): a client waiting on an expectation we will never meet learns right away instead of timing out. An empty element names no expectation and is dropped, so an emptied value passes.
+
 No `_bail_request` here: every bail-out below sits after the header loop, which has already dumped the full request, so `send_error()` is called directly.
+
+* $1 - true when reading from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script — the interim response is written only once, by the first parse
 
 Examples
 
-     _read_request_body
+     _read_request_body true
 
 
 `read_request()`

@@ -117,6 +117,7 @@ function init_environment()
 	)
 	# Public: Generic HTTP response code with their meaning (associative array)
 	declare -rAg HTTP_RESPONSE=(
+		[100]='Continue'
 		[200]='OK'
 		[206]='Partial Content'
 		[301]='Moved Permanently'
@@ -133,6 +134,7 @@ function init_environment()
 		[413]='Content Too Large'
 		[414]='URI Too Long'
 		[416]='Range Not Satisfiable'
+		[417]='Expectation Failed'
 		[431]='Request Header Fields Too Large'
 		[500]='Internal Server Error'
 		[501]='Not Implemented'
@@ -1345,12 +1347,25 @@ export -f _drain_request_input
 # A body of type `application/x-www-form-urlencoded` is decoded into
 # `REQUEST_BODY_PARAMETERS`.
 #
+# A client that announced `Expect: 100-continue` (RFC 9110 §10.1.1) is holding the body
+# back, so the interim `HTTP/1.1 100 Continue` line is written right before the body
+# read. Every refusal above it answers with a final status instead — the alternative the
+# same section allows. No interim line goes to an HTTP/1.0 client (a MUST NOT), whose
+# expectation is ignored. `Expect` is a list, and naming anything but `100-continue` in
+# it is a `417 Expectation Failed`, on any method (a MAY): a client waiting on an
+# expectation we will never meet learns right away instead of timing out. An empty
+# element names no expectation and is dropped, so an emptied value passes.
+#
 # No `_bail_request` here: every bail-out below sits after the header loop, which has
 # already dumped the full request, so `send_error()` is called directly.
 #
+# $1 - true when reading from the standard input, false when re-parsing
+#      `REQUEST_FULL_STRING` in a child script — the interim response is written only
+#      once, by the first parse
+#
 # Examples
 #
-#    _read_request_body
+#    _read_request_body true
 function _read_request_body()
 {
 	if [ -v "REQUEST_HEADERS['transfer-encoding']" ]; then
@@ -1377,8 +1392,35 @@ function _read_request_body()
 			send_error 400
 		fi
 	fi
+	# an expectation we won't meet is refused on any method (RFC 9110 §10.1.1 MAY): a
+	# waiting client learns right away instead of timing out, and a 417 is still the
+	# immediate final response §10.1.1 asks for. The value is the list §5.6.1 says it is:
+	# a repeated 100-continue (the header loop merges repeated lines) still names only
+	# the one expectation we meet, and an empty element names none at all — the header
+	# merge's own rule — so an emptied value passes
+	local expect_continue=false
+	local -a expect_members
+	local member
+	IFS=',' read -ra expect_members <<< "${REQUEST_HEADERS['expect']:-}"
+	for member in "${expect_members[@]}"; do
+		IFS=$' \t' read -r member <<< "$member"	# strips the OWS around the element
+		if [ -z "$member" ]; then
+			continue
+		fi
+		if [ "${member,,}" != '100-continue' ]; then
+			log "EXPECTATION FAILED: unsupported Expect '${REQUEST_HEADERS['expect']}'"
+			# only a Content-Length announces a body here — a Transfer-Encoding was
+			# refused above — and with none announced the drain would only sit out
+			# its own read timeout
+			if [ -v "REQUEST_HEADERS['content-length']" ]; then
+				_drain_request_input
+			fi
+			send_error 417
+		fi
+		expect_continue=true
+	done
 	if [ "$REQUEST_METHOD" != 'POST' ] || [ ! -v "REQUEST_HEADERS['content-length']" ]; then
-		return 0
+		return 0 # no body is OK
 	fi
 	local -r raw_length="${REQUEST_HEADERS['content-length']}"
 	# a bogus length makes `read` fail with a bash error, and a huge one makes it wait
@@ -1397,6 +1439,15 @@ function _read_request_body()
 		log "TOO LARGE: Content-Length '$length' over the $MAX_BODY_SIZE bytes limit"
 		_drain_request_input
 		send_error 413
+	fi
+	# RFC 9110 §10.1.1: the client is waiting for this line before it sends the body just
+	# measured. Raw, not `_send_header()`: an interim response carries no header fields
+	# here, no access-log line, and must not consume `RESPONSE_HEADERS`. Never to an
+	# HTTP/1.0 client (§2.3 processes a higher 1.x minor as 1.1, same rule as the Host gate)
+	if [ "$1" = true ] && [ "$expect_continue" = true ] \
+		&& [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ]; then
+		printf 'HTTP/1.1 100 %s\r\n\r\n' "${HTTP_RESPONSE[100]}"
+		log_debug "> HTTP/1.1 100 ${HTTP_RESPONSE[100]}"
 	fi
 	# `Content-Length` counts bytes, but `-N` counts characters: in a UTF-8 locale a
 	# multibyte body would make us wait for characters the client never sends
@@ -1452,6 +1503,6 @@ function read_request()
 {
 	_read_request_line "$1"
 	_read_request_headers "$1"
-	_read_request_body
+	_read_request_body "$1"
 }
 export -f read_request

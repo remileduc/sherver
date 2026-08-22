@@ -373,6 +373,89 @@ authority.example' ]
 	[ "$(status_code)" = '411' ]
 }
 
+# --------------------------------------------------------- Expect: 100-continue
+
+@test "Expect: 100-continue gets the interim line, then the final response" {
+	# POST / runs index.sh, whose re-parse of REQUEST_FULL_STRING must not repeat the
+	# interim line — hence the count
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
+		'Expect: 100-continue'
+	[ "$(head -n 1 -- "$RESPONSE" | tr -d '\r')" = 'HTTP/1.1 100 Continue' ]
+	[ "$(sed -n '2p' -- "$RESPONSE")" = $'\r' ]
+	[ "$(sed -n '3p' -- "$RESPONSE" | tr -d '\r')" = 'HTTP/1.1 200 OK' ]
+	[ "$(grep -ac '^HTTP/1.1 100 Continue' -- "$RESPONSE")" = '1' ]
+	grep -aq "You just sent me 'hello'" -- "$RESPONSE"
+}
+
+@test "the expectation token is case insensitive" {
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
+		'Expect: 100-Continue'
+	[ "$(head -n 1 -- "$RESPONSE" | tr -d '\r')" = 'HTTP/1.1 100 Continue' ]
+}
+
+@test "a repeated 100-continue still names only the expectation we meet" {
+	# an intermediary may repeat the field; the header loop merges it back into the
+	# list it stands for, which still expects nothing but the 100
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
+		'Expect: 100-continue' 'Expect: 100-continue'
+	[ "$(head -n 1 -- "$RESPONSE" | tr -d '\r')" = 'HTTP/1.1 100 Continue' ]
+	[ "$(status_code)" = '200' ]
+}
+
+@test "an Expect list of empty elements names no expectation" {
+	# RFC 9110 §5.6.1: an empty element is ignorable, same rule as the emptied value
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Expect: ,'
+	[ "$(status_code)" = '200' ]
+}
+
+@test "an unmet expectation is a 417 even listed next to a 100-continue" {
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
+		'Expect: 100-continue, tea'
+	[ "$(status_code)" = '417' ]
+	! grep -aq '^HTTP/1.1 100 Continue' -- "$RESPONSE"
+}
+
+@test "an HTTP/1.0 client never gets the interim response" {
+	# the MUST NOT of RFC 9110 §10.1.1 — a 1.0 request needs no Host either
+	request 'hello' 'POST / HTTP/1.0' 'Content-Length: 5' 'Expect: 100-continue'
+	[ "$(status_code)" = '200' ]
+	! grep -aq '^HTTP/1.1 100 Continue' -- "$RESPONSE"
+}
+
+@test "a refused body is a final status with no interim line" {
+	# the "immediate final response" alternative of RFC 9110 §10.1.1
+	request '' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 65537' \
+		'Expect: 100-continue'
+	[ "$(status_code)" = '413' ]
+	! grep -aq '^HTTP/1.1 100 Continue' -- "$RESPONSE"
+}
+
+@test "any other Expect value is a 417" {
+	# the MAY of RFC 9110 §10.1.1: an expectation we will never meet is refused right
+	# away, not left to the client's timeout
+	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
+		'Expect: tea'
+	[ "$(status_code)" = '417' ]
+	! grep -aq '^HTTP/1.1 100 Continue' -- "$RESPONSE"
+}
+
+@test "the Expect gate fires on any method, not only POST" {
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Expect: tea'
+	[ "$(status_code)" = '417' ]
+}
+
+@test "an emptied Expect names no expectation and is served" {
+	# RFC 9110 §5.6.1: same rule as the emptied Transfer-Encoding
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Expect:'
+	[ "$(status_code)" = '200' ]
+}
+
+@test "Expect on a request with no body to read gets the final response only" {
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Expect: 100-continue'
+	[ "$(status_code)" = '200' ]
+	! grep -aq '^HTTP/1.1 100 Continue' -- "$RESPONSE"
+}
+
 # --------------------------------------------------------------- size limits
 
 @test "a request line over 8 kio is a 414" {

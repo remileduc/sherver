@@ -78,25 +78,46 @@ function request()
 	request_raw "$raw"$'\r\n'"$body"
 }
 
-# Public: Print the status code of the last response.
+# Internal: Print the number of the line holding the final status line.
+#
+# A response to `Expect: 100-continue` opens with an interim block — an `HTTP/1.1 1xx`
+# status line and the blank line that closes it — before the real one. Every helper
+# below describes the final response, so such blocks are skipped.
+function _final_response_line()
+{
+	local -i line=1 skip
+	while sed -n "${line}p" -- "$RESPONSE" | grep -q -a '^HTTP/1\.[01] 1[0-9][0-9]'; do
+		skip=$(tail -n "+$line" -- "$RESPONSE" | grep -a -n -m 1 $'^\r$' | cut -d ':' -f 1)
+		# a truncated interim block has nothing after it to point at
+		if [ "$skip" -eq 0 ]; then
+			break
+		fi
+		line+=skip
+	done
+	echo "$line"
+}
+
+# Public: Print the status code of the last response, interim 1xx blocks skipped.
 function status_code()
 {
-	head -n 1 -- "$RESPONSE" | cut -d ' ' -f 2
+	sed -n "$(_final_response_line)p" -- "$RESPONSE" | cut -d ' ' -f 2
 }
 
-# Public: Print the whole status line of the last response, without the CR.
+# Public: Print the final status line of the last response, without the CR.
 function status_line()
 {
-	head -n 1 -- "$RESPONSE" | tr -d '\r'
+	sed -n "$(_final_response_line)p" -- "$RESPONSE" | tr -d '\r'
 }
 
-# Internal: Print the number of the line that closes the headers.
+# Internal: Print the number of the line that closes the final response's headers.
 #
 # The pattern needs `$'...'`: the CR has to be a real one, `'\r'` is a backslash
 # followed by an `r` and matches nothing.
 function _header_lines()
 {
-	grep -a -n -m 1 $'^\r$' -- "$RESPONSE" | cut -d ':' -f 1
+	local -i start
+	start=$(_final_response_line)
+	echo "$(( start - 1 + $(tail -n "+$start" -- "$RESPONSE" | grep -a -n -m 1 $'^\r$' | cut -d ':' -f 1) ))"
 }
 
 # Public: Print the value of the given response header, or nothing if it is absent.
@@ -111,7 +132,7 @@ function _header_lines()
 #    [ "$(header Content-Type)" = 'text/html; charset=utf-8' ]
 function header()
 {
-	head -n "$(_header_lines)" -- "$RESPONSE" | tr -d '\r' \
+	sed -n "$(_final_response_line),$(_header_lines)p" -- "$RESPONSE" | tr -d '\r' \
 		| grep -i "^$1: " | cut -d ' ' -f 2-
 }
 
@@ -121,7 +142,7 @@ function header()
 # not something a test can rely on.
 function header_names()
 {
-	head -n "$(( $(_header_lines) - 1 ))" -- "$RESPONSE" | tail -n +2 | tr -d '\r' \
+	sed -n "$(( $(_final_response_line) + 1 )),$(( $(_header_lines) - 1 ))p" -- "$RESPONSE" | tr -d '\r' \
 		| cut -d ':' -f 1 | tr '[:upper:]' '[:lower:]' | sort
 }
 

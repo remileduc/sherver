@@ -118,9 +118,7 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - `Transfer-Encoding` is refused on any method: a chunked body is a `411` instead of being decoded —
   resend it with a `Content-Length` *in place of* the `Transfer-Encoding`, the two together being
   the request smuggling pair and a `400` — and any other value is a `400`, no coding will ever be
-  supported.
-  `Expect: 100-continue` is not answered — a client that waits for it eats socat's timeout and sends
-  anyway. No common client sends chunked or `Expect` unprompted
+  supported. No common client sends chunked unprompted
 - header *values* are taken as they come: only the field name is validated, and a value is checked
   where it is read (`Content-Length`, `Range`) or not at all
 - no security (see [About Security](#about-security)).
@@ -304,6 +302,12 @@ array `REQUEST_BODY_PARAMETERS`.
 The body is limited to 64 kio (see `MAX_BODY_SIZE`), and a bigger one gets a `413` answer. The limit is
 not arbitrary: the body ends up in `REQUEST_FULL_STRING` which is exported, and Linux refuses to run a
 command when a single environment variable is bigger than 128 kio.
+
+A client that announces `Expect: 100-continue` on a POST carrying a `Content-Length` (curl does, on
+large POSTs) gets the interim `HTTP/1.1 100 Continue` line before the body is read, so it never waits
+on its own timeout; a request refused before the body read, or sent over HTTP/1.0, gets its final
+status directly instead. An `Expect` naming any expectation but `100-continue` is one Sherver will
+never meet, and is answered `417` on any method.
 
 Any content can be sent back to the client. You can add the correct mime type thanks to the method `add_header`.
 

@@ -130,15 +130,18 @@ Error codes
 Which function sends which code through `send_error` (`read_request` routes its early parse
 failures through `_bail_request`, which owns the dump-and-log convention):
 
-| Function           | Codes                             | Sent when                                                 |
-| ------------------ | --------------------------------- | --------------------------------------------------------- |
-| `read_request`     | 400, 405, 413, 414, 431, 501, 505 | bad request line, header or body; method; version; limits |
-| `parse_url`        | 400                               | invalid percent encoding                                  |
-| `_resolve_path`    | 404, 500                          | path missing or escaping the tree — never 403             |
-| `run_script`       | 404, 500                          | endpoint not executable, or it exited non-zero            |
-| `send_file`        | 404, 416                          | not a readable regular file; unsatisfiable `Range`        |
-| `send_redirect`    | 500                               | no target, a CR or LF in it, or non-redirect code         |
-| `scripts/page.sh`  | 404, 405                          | missing `page` parameter; method not GET or HEAD          |
+| Function           | Codes                                       | Sent when                                                 |
+| ------------------ | ------------------------------------------- | --------------------------------------------------------- |
+| `read_request`     | 400, 405, 411, 413, 414, 417, 431, 501, 505 | bad request line, header or body; method; version; limits |
+| `parse_url`        | 400                                         | invalid percent encoding                                  |
+| `_resolve_path`    | 404, 500                                    | path missing or escaping the tree — never 403             |
+| `run_script`       | 404, 500                                    | endpoint not executable, or it exited non-zero            |
+| `send_file`        | 404, 416                                    | not a readable regular file; unsatisfiable `Range`        |
+| `send_redirect`    | 500                                         | no target, a CR or LF in it, or non-redirect code         |
+| `scripts/page.sh`  | 404, 405                                    | missing `page` parameter; method not GET or HEAD          |
+
+`read_request` also writes the interim `HTTP/1.1 100 Continue` itself, raw — never through
+`_send_header`, which would log an access line and consume `RESPONSE_HEADERS`.
 
 External commands
 -----------------
