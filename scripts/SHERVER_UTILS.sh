@@ -85,17 +85,27 @@ function init_environment()
 	#
 	# The keys are lowercase, because HTTP header names are case insensitive:
 	# use `REQUEST_HEADERS['content-type']`, not `REQUEST_HEADERS['Content-Type']`.
+	#
+	# A header the client repeated is here as the `v1, v2` list it stands for (RFC 9110 §5.2).
+	# `Cookie` recombines on `; ` instead (RFC 9113 §8.2.3), and a repeated `Host`,
+	# `Content-Length` or `Content-Type` with two different values is a 400.
 	declare -Ag REQUEST_HEADERS
 	# Public: Body of the request (mainly useful for POST)
 	declare -g REQUEST_BODY=''
 	# Public: parameters of the request, in case of POST with `application/x-www-form-urlencoded`
 	# content
+	#
+	# filled through the nameref of `_parse_parameters`, which shellcheck can't see
+	# shellcheck disable=SC2034
 	declare -Ag REQUEST_BODY_PARAMETERS
 	# Public: The base URL, without the query string if any
 	declare -g URL_BASE=''
 	# Public: The parameters of the query string if any (in an associative array)
 	#
 	# See `parse_url()`.
+	#
+	# filled through the nameref of `_parse_parameters`, which shellcheck can't see
+	# shellcheck disable=SC2034
 	declare -Ag URL_PARAMETERS
 	# Public: The response headers (associative array)
 	declare -Ag RESPONSE_HEADERS=(
@@ -111,7 +121,10 @@ function init_environment()
 		[206]='Partial Content'
 		[301]='Moved Permanently'
 		[302]='Found'
+		[303]='See Other'
 		[304]='Not Modified'
+		[307]='Temporary Redirect'
+		[308]='Permanent Redirect'
 		[400]='Bad Request'
 		[403]='Forbidden'
 		[404]='Not Found'
@@ -143,13 +156,25 @@ function init_environment()
 	# `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if
 	# every header character takes 4 bytes.
 	declare -rg MAX_HEADERS_SIZE=$((8 * 1024))
+	# Internal: anchored regex matching a whole RFC 9110 §5.6.2 token
+	#
+	# Shared by the method check of `_read_request_line()` and the field name check of
+	# `_read_request_headers()`: both are that one grammar rule, so they must not drift.
+	# The ranges are spelled out because `[[:alnum:]]` follows the locale, and the
+	# `LC_ALL=C.UTF-8` of the dispatcher would let every Unicode letter through.
+	declare -rg _HTTP_TOKEN_REGEX=$'^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$'
 	# Internal: canonical path computed by `_resolve_path()`
-	declare -g RESOLVED_PATH=''
+	declare -g _RESOLVED_PATH=''
 	# Internal: the request-target exactly as the client sent it
 	#
 	# The access log reads it instead of `REQUEST_URL`, which loses the absolute form to the
 	# rewrite in `read_request()` — the log must keep proxy-style requests greppable.
-	declare -g REQUEST_TARGET=''
+	declare -g _REQUEST_TARGET=''
+	# Internal: the validated authority of an absolute-form target, empty otherwise
+	#
+	# Filled by `_read_request_line()` when the target proves absolute-form, applied over
+	# the `Host` header by `_read_request_headers()`.
+	declare -g _REQUEST_AUTHORITY=''
 	# Public: `true` when verbose logging is on, see `log_debug()`
 	#
 	# Read from the environment because that is the only channel that survives the exec into
@@ -257,6 +282,57 @@ function _url_decode()
 }
 export -f _url_decode
 
+# Internal: Fill an associative array from a string of urlencoded parameters.
+#
+# **Note:** this method is used by `parse_url()` and `_read_request_body()` and shouldn't
+# be called manually.
+#
+# Takes the `key=value` pairs joined by `&` that a query string and an urlencoded body
+# share, decodes both sides, and stores them in the array named by the second parameter.
+# The array is emptied first, so a second parse never keeps keys from the first one.
+# The string must have been accepted by `_check_encoding()` first.
+#
+# A parameter without a name is skipped, as an empty key is not a valid array subscript.
+# A `+` decodes to a space, in the query string and in a form body both.
+#
+# $1 - the urlencoded parameters (`key=value` pairs joined by `&`)
+# $2 - name of the associative array to fill
+#
+# Examples
+#
+#    _parse_parameters 'test=youpi&city=caf%C3%A9+ville' 'URL_PARAMETERS'
+#
+# will result in
+#
+#    URL_PARAMETERS=(
+#        ['test']='youpi'
+#        ['city']='café ville'
+#    )
+function _parse_parameters()
+{
+	# a nameref, because the two callers fill two different arrays
+	local -n _parameters=$2
+	# a child script may call `parse_url` on a second URL: keys must not accumulate
+	_parameters=()
+	# first, split `key=value` in an array
+	local -a fields
+	IFS='&' read -ra fields <<< "$1"
+	local key value
+	local -i i
+	for (( i=0; i < ${#fields[@]}; i++ )); do
+		IFS='=' read -r key value <<< "${fields[i]}"
+		# an empty key is a fatal `bad array subscript`, and carries no information anyway
+		if [ -z "$key" ]; then
+			continue
+		fi
+		# `+` is a space in urlencoded content
+		_url_decode key "${key//+/ }"
+		_url_decode value "${value//+/ }"
+		_parameters["$key"]="$value"
+	done
+}
+export -f _parse_parameters
+
 # Public: Parse the given URL to exrtact the base URL and the query string.
 #
 # Takes an optional parameters: the URL to parse. By default, it will take the content of
@@ -296,28 +372,9 @@ function parse_url()
 	# get base URL and parameters
 	local parameters
 	IFS='?' read -r URL_BASE parameters <<< "$url"
+	# a `+` stays a `+` in the path: the space treatment belongs to the parameters only
 	_url_decode URL_BASE "$URL_BASE"
-	# now split parameters
-	# first, split `key=value` in an array
-	local -a fields
-	IFS='&' read -ra fields <<< "$parameters"
-	# now we fill URL_PARAMETERS
-	# keep in sync with the twin loop in `read_request`, which decodes an urlencoded body
-	local key value
-	local -i i
-	for (( i=0; i < ${#fields[@]}; i++ )); do
-		IFS='=' read -r key value <<< "${fields[i]}"
-		# an empty key is a fatal `bad array subscript`, and carries no information anyway
-		if [ -z "$key" ]; then
-			continue
-		fi
-		# `+` is a space in a query string, but stays a `+` in the path above
-		_url_decode key "${key//+/ }"
-		_url_decode value "${value//+/ }"
-		# read by the child scripts, which shellcheck can't see from here
-		# shellcheck disable=SC2034
-		URL_PARAMETERS["$key"]="$value"
-	done
+	_parse_parameters "$parameters" 'URL_PARAMETERS'
 }
 export -f parse_url
 
@@ -399,7 +456,7 @@ function _send_header()
 	# the access log: the only line a quiet server writes for a request it served. socat's
 	# EXEC sets the peer address; a `-` means no socat in front, like the filter-driven
 	# tests. A request too broken to have a method is answered before those variables are filled
-	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${REQUEST_TARGET:--} $1"
+	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${_REQUEST_TARGET:--} $1"
 	# HTTP header
 	log_debug "> HTTP/1.1 $1 ${HTTP_RESPONSE[$1]}"
 	# `printf`, not `echo -e`: a header value holding a literal `\r\n` would be turned into a
@@ -536,12 +593,15 @@ export -f send_error
 
 # Public: Send a redirect to the given URL as an answer.
 #
-# Takes the target URL, and optionally the response code: 302 (the default) for a
-# temporary redirect, 301 for a permanent one — the two redirects `HTTP_RESPONSE` knows.
-# Anything else is refused with a 500: `send_response` would die expanding an unknown
-# code mid-answer, and the client would get nothing at all.
+# Takes the target URL, and optionally the response code, one of the five redirects of
+# RFC 9110 §15.4: 302 (the default) for a temporary redirect, 301 for a permanent one,
+# 303 to tell the client to GET the target, and 307/308 as their method-preserving
+# counterparts — a strict client may repeat a POST on a 301/302, only 303 guarantees the
+# switch to GET. Anything else is refused with a 500: `send_response` would die expanding
+# an unknown code mid-answer, and the client would get nothing at all.
 #
-# The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form.
+# The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form —
+# that is 303.
 #
 # A target holding a CR or a LF is refused with a 500 the same way: it would split the
 # Location header in two. The rest is the caller's business — a target built from the request
@@ -551,7 +611,7 @@ export -f send_error
 # Like the other `send_*` functions, it exits: nothing after it runs.
 #
 # $1 - the URL to redirect to (a path like `/index.sh`, or a full URL)
-# $2 - Optional: the response code, 301 or 302 (default 302)
+# $2 - Optional: the response code, 301, 302, 303, 307 or 308 (default 302)
 #
 # Examples
 #
@@ -575,7 +635,7 @@ function send_redirect()
 	fi
 	local -r code="${2:-302}"
 	case "$code" in
-		301|302) ;;
+		301|302|303|307|308) ;;
 		*)
 			log "MISCONFIGURED: send_redirect got code '$code', which is not a redirect"
 			send_error 500
@@ -594,7 +654,7 @@ export -f send_redirect
 # Takes the authorized directory (relative to `SHERVER_ROOT`) and the path to resolve. The
 # path is canonicalized, so neither `..` nor a symlink can be used to escape the directory.
 #
-# The result is stored in `RESOLVED_PATH` instead of being echoed, because this function
+# The result is stored in `_RESOLVED_PATH` instead of being echoed, because this function
 # exits on error: in a command substitution, the error page would be captured by the caller
 # instead of being sent to the client.
 #
@@ -610,7 +670,7 @@ export -f send_redirect
 #
 # will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
 #
-#    RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
+#    _RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
 function _resolve_path()
 {
 	local authorized
@@ -632,12 +692,12 @@ function _resolve_path()
 	# all, has no `--` either to stop it being read as one
 	local -r target="./$2"
 	# and no `-e` either: busybox realpath happily resolves a missing last component
-	if [[ ! -e $target ]] || ! RESOLVED_PATH=$(realpath "$target" 2>/dev/null); then
+	if [[ ! -e $target ]] || ! _RESOLVED_PATH=$(realpath "$target" 2>/dev/null); then
 		log "NOT FOUND: realpath - '$2'"
 		send_error 404
 	fi
-	if [[ $RESOLVED_PATH != "$authorized"/* ]]; then
-		log "FORBIDDEN: '$2' resolves to '$RESOLVED_PATH', outside of '$authorized'"
+	if [[ $_RESOLVED_PATH != "$authorized"/* ]]; then
+		log "FORBIDDEN: '$2' resolves to '$_RESOLVED_PATH', outside of '$authorized'"
 		send_error 404 # not 403 to avoid leak of the FS
 	fi
 }
@@ -816,7 +876,7 @@ export -f _get_mimetype
 function send_file()
 {
 	_resolve_path 'file' "$1"
-	local -r file="$RESOLVED_PATH"
+	local -r file="$_RESOLVED_PATH"
 	# existence is already guaranteed by `_resolve_path`
 	if [ ! -f "$file" ] || [ ! -r "$file" ]; then
 		send_error 404
@@ -963,7 +1023,7 @@ function run_script()
 	local -r url="${1:-$REQUEST_URL}"
 	parse_url "$url"
 	_resolve_path 'scripts' "${URL_BASE:1}"
-	local -r script="$RESOLVED_PATH"
+	local -r script="$_RESOLVED_PATH"
 	# existence is already guaranteed by `_resolve_path`
 	if [ ! -f "$script" ] || [ ! -x "$script" ]; then
 		send_error 404
@@ -975,13 +1035,15 @@ export -f run_script
 
 # Internal: Log a request parse failure, dump the request when relevant, and answer an error.
 #
-# **Note:** this method is used by `read_request()` and shouldn't be called manually.
+# **Note:** this method is used by `_read_request_line()` and `_read_request_headers()` and
+# shouldn't be called manually.
 #
 # Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse
 # only (a child script re-parse would dump it once per script), the reason is always
 # `log`ged, and `send_error()` ends the process — this function never returns. Only for the
 # bail-outs *before* the end of the header loop: after that point, the first parse has
-# already dumped the full request unconditionally, and this would dump it a second time.
+# already dumped the full request unconditionally, and this would dump it a second time —
+# which is why `_read_request_body()` calls `send_error()` directly.
 #
 # $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
 # $2 - the reason, `log`ged as is
@@ -1000,32 +1062,25 @@ function _bail_request()
 }
 export -f _bail_request
 
-# Internal: Read the client request and set up environment.
+# Internal: Read and validate the request line, and parse the URL.
 #
-# **Note:** this method is used by the dispatcher and shouldn't be called manually.
+# **Note:** this method is used by `read_request()` and shouldn't be called manually.
 #
-# Reads the input stream and fills the following variables (also run `parse_url()`):
-#
-# * `REQUEST_METHOD`
-# * `REQUEST_HTTP_VERSION`
-# * `REQUEST_HEADERS`
-# * `REQUEST_BODY`
-# * `REQUEST_BODY_PARAMETERS`
-# * `REQUEST_URL`
-# * `URL_BASE`
-# * `URL_PARAMETERS`
+# Reads the first line of the input stream and fills `REQUEST_METHOD`, `REQUEST_URL` and
+# `REQUEST_HTTP_VERSION` — plus `URL_BASE` and `URL_PARAMETERS` through `parse_url()`.
+# `REQUEST_FULL_STRING` starts here, with the raw line.
 #
 # An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to
-# the path it points at, and its authority — validated first — replaces
-# `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400,
-# the asterisk form of `OPTIONS` excepted.
+# the path it points at, and its authority — validated first — is stored in
+# `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not
+# a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
 #
-# *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
+# $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
 #
-# $1 - true when parsing from the standard input, false when re-parsing
-#      `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so
-#      that a request is not dumped once per script it goes through
-function read_request()
+# Examples
+#
+#    _read_request_line true
+function _read_request_line()
 {
 	local line
 	# this bail-out and the 414 below stay outside `_bail_request`: `REQUEST_FULL_STRING`
@@ -1045,7 +1100,7 @@ function read_request()
 
 	# read URL
 	read -r REQUEST_METHOD REQUEST_URL REQUEST_HTTP_VERSION <<< "$line"
-	REQUEST_TARGET="$REQUEST_URL"	# saved before the rewrite below, for the access log
+	_REQUEST_TARGET="$REQUEST_URL"	# saved before the rewrite below, for the access log
 	# `read` collapses SP/TAB runs and drops trailing blanks (a leniency RFC 9112 §3 grants),
 	# so only non-whitespace extra tokens get glued into the version and rejected here.
 	if [ -z "$REQUEST_METHOD" ] || [ -z "$REQUEST_URL" ] \
@@ -1059,8 +1114,7 @@ function read_request()
 	fi
 	# RFC 9112 §3: a method is a token (RFC 9110 §5.6.2 tchar), so a stray octet in it is a
 	# malformed request line — a 400 — where a well-formed unknown method is a 501 below
-	local -r tchar=$'^[[:alnum:]!#$%&\'*+.^_`|~-]+$'
-	if [[ ! "$REQUEST_METHOD" =~ $tchar ]]; then
+	if [[ ! "$REQUEST_METHOD" =~ $_HTTP_TOKEN_REGEX ]]; then
 		_bail_request 400 "BAD REQUEST: invalid method token '$REQUEST_METHOD'" "$1"
 	fi
 	# Membership test and not a `case` pattern: a variable expanded into a pattern has its
@@ -1080,8 +1134,6 @@ function read_request()
 				;;
 		esac
 	fi
-	# empty until the target proves absolute-form, then holds its validated authority
-	local authority=''
 	# RFC 9112 §3.2.2: the absolute-form target a proxy sends MUST be accepted. Rewritten to
 	# the origin form here, before anything reads the URL, so that `parse_url`,
 	# `_resolve_path` and the child scripts only ever see a path. Only the scheme is case
@@ -1093,13 +1145,13 @@ function read_request()
 		# the authority ends at the first `/` or `?` (RFC 3986 §3.2), and what follows it
 		# keeps its own delimiter — cutting on `/` alone would eat a `?query`
 		local rest="${target#*://}"
-		authority="${rest%%[/?]*}"
-		rest="${rest:${#authority}}"
+		_REQUEST_AUTHORITY="${rest%%[/?]*}"
+		rest="${rest:${#_REQUEST_AUTHORITY}}"
 		# RFC 9110 §4.2: an empty host — bare or in front of a `:port` — is invalid in an
 		# http(s) URI and userinfo is an error — and nothing downstream `_check_encoding`s
 		# what lands in `Host` here
-		if [ -z "${authority%%:*}" ] || [[ "$authority" == *@* ]] \
-				|| ! _check_encoding "$authority"; then
+		if [ -z "${_REQUEST_AUTHORITY%%:*}" ] || [[ "$_REQUEST_AUTHORITY" == *@* ]] \
+				|| ! _check_encoding "$_REQUEST_AUTHORITY"; then
 			_bail_request 400 "BAD REQUEST: invalid authority in '$REQUEST_URL'" "$1"
 		fi
 		REQUEST_URL="/${rest#/}"	# an absolute URI needs no path, and no path is the root
@@ -1115,11 +1167,42 @@ function read_request()
 	fi
 	# fill URL_*
 	parse_url "$REQUEST_URL"
+}
+export -f _read_request_line
 
-	# fill REQUEST_HEADERS
-	local key value
-	while read -r line; do
-		# checked first, for the same reasons as the request line above
+# Internal: Read the header lines and fill `REQUEST_HEADERS`.
+#
+# **Note:** this method is used by `read_request()` and shouldn't be called manually.
+#
+# Reads the input stream up to the empty line that ends the headers, appending each line to
+# `REQUEST_FULL_STRING` on the way.
+#
+# A header line is refused with a 400 when it is folded (obs-fold), has no colon, or has a
+# name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2).
+# A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose
+# pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or
+# `Content-Type` with two different values is a 400: they frame the request, and none of
+# the three is a list. A repeated `Host` is ignored instead, without being compared, when
+# the request-target already carried an authority.
+#
+# Once the loop is done, the `_REQUEST_AUTHORITY` of an absolute-form target replaces
+# `REQUEST_HEADERS['host']` (RFC 9112 §3.2.2), and any other HTTP/1.1+ request without a
+# `Host` header is refused with a 400.
+#
+# $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
+#
+# Examples
+#
+#    _read_request_headers true
+function _read_request_headers()
+{
+	local line key name value separator
+	# `IFS=` is load-bearing: the default one strips the leading SP/HTAB of a line, so the
+	# obs-fold check below could never fire and a continuation carrying a colon would be
+	# de-folded into a header of its own — and a whitespace-only line would collapse to the
+	# empty string and `break` the loop, dropping every header behind it
+	while IFS= read -r line; do
+		# checked first, for the same reasons as the request line
 		if [ $(( ${#REQUEST_FULL_STRING} + ${#line} + 1 )) -gt "$MAX_HEADERS_SIZE" ]; then
 			_bail_request 431 "TOO LARGE: headers over the $MAX_HEADERS_SIZE characters limit" "$1"
 		fi
@@ -1130,86 +1213,185 @@ function read_request()
 		fi
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 $line"
-		IFS=$': \t' read -r key value <<< "$line"
-		# an empty name is a fatal `bad array subscript`, and only a broken client sends one
-		if [ -z "$key" ]; then
-			_bail_request 400 'BAD REQUEST: header line without a name' "$1"
+		# RFC 9112 §5.2: a line starting with whitespace is an obs-fold continuation, which a
+		# server must reject or splice. Rejecting is the honest half — spliced, it would have
+		# to be re-split here and re-folded in `REQUEST_FULL_STRING` for the child re-parse
+		if [[ "$line" == [[:space:]]* ]]; then
+			_bail_request 400 'BAD REQUEST: obsolete line folding in the headers' "$1"
 		fi
-		# header names are case insensitive, so we normalize them to lowercase
-		REQUEST_HEADERS["${key,,}"]="$value"
+		key="${line%%:*}"	# cut out of the raw line: the `read` below eats what we refuse
+		# RFC 9112 §5: a field line is `name ":" OWS value OWS`, so with no colon there is no
+		# field at all — and a bare `Host` line used to satisfy the presence check below
+		if [ "$key" = "$line" ]; then
+			_bail_request 400 "BAD REQUEST: header line without a colon: '$line'" "$1"
+		fi
+		# a field name is a token (RFC 9110 §5.6.2), so this one test covers the whitespace
+		# before the colon that RFC 9112 §5.1 MUSTs out (a request smuggling vector: a proxy
+		# that trimmed it instead would forward a header we never saw), the empty name that is
+		# a fatal `bad array subscript`, and any stray octet
+		if [[ ! "$key" =~ $_HTTP_TOKEN_REGEX ]]; then
+			_bail_request 400 "BAD REQUEST: invalid header name '$key'" "$1"
+		fi
+		name="${key,,}"	# header names are case insensitive
+		IFS=$' \t' read -r value <<< "${line#*:}"	# strips the OWS, and only the OWS
+		# the subscripts are quoted throughout: a field name may legally be `*`, and unquoted
+		# that one would read as every element of the array. `[[` and never `[`: the latter
+		# re-expands the subscript it is handed, so a name holding a backquote or a `$` — both
+		# of them tchar — would run a command, or abort the whole dispatcher under `set -u`
+		if [[ ! -v REQUEST_HEADERS["$name"] ]]; then
+			REQUEST_HEADERS["$name"]="$value"
+		else
+			case "$name" in
+				host|content-length|content-type)
+					# RFC 9112 §3.2.2: with an absolute-form target its authority wins and
+					# every `Host` line MUST be ignored, so two conflicting ones are no
+					# ambiguity to refuse here
+					if [ "$name" = 'host' ] && [ -n "$_REQUEST_AUTHORITY" ]; then
+						continue
+					fi
+					# none of those three is a list: two `Host` values make the target
+					# ambiguous (RFC 9112 §3.2), two `Content-Length` values the body framing
+					# (§6.3) — the request smuggling pair — and two `Content-Type` values the
+					# body parse, where `_read_request_body` cuts the merged list back at its
+					# first `;` and would read one media type out of two. Repeated identical
+					# values are unambiguous, they pass
+					if [ "${REQUEST_HEADERS["$name"]}" != "$value" ]; then
+						_bail_request 400 "BAD REQUEST: conflicting '$key' headers" "$1"
+					fi
+					continue	# never merged: an identical repeat collapses into the stored value
+					;;
+				cookie)
+					# RFC 6265 §5.4 forbids repeating `Cookie`, but RFC 9113 §8.2.3 lets an
+					# HTTP/2 hop split it — and it recombines on `; `, never on a comma
+					separator='; '
+					;;
+				*)
+					# RFC 9110 §5.2: a repeated field is the comma-separated list it stands
+					# for. Overwriting instead would drop what the client sent, and a header
+					# we compare as a whole (`If-None-Match`...) degrades to a full answer
+					separator=', '
+					;;
+			esac
+			# an empty element is ignorable anyway (RFC 9110 §5.6.1), so it never enters the
+			# list: a stored empty value is replaced, an incoming empty value is dropped
+			if [ -z "${REQUEST_HEADERS["$name"]}" ]; then
+				REQUEST_HEADERS["$name"]="$value"
+			elif [ -n "$value" ]; then
+				REQUEST_HEADERS["$name"]="${REQUEST_HEADERS["$name"]}$separator$value"
+			fi
+		fi
 	done
 	if [ "$1" = true ]; then
 		log_debug "$REQUEST_FULL_STRING"
 	fi
 	# RFC 9112 §3.2.2: with an absolute-form target, its authority wins and the `Host` header
-	# MUST be ignored. Done here and not with the rewrite above, where the header loop would
-	# then let a `Host:` line overwrite it and invert the MUST
-	if [ -n "$authority" ]; then
-		REQUEST_HEADERS['host']="$authority"
+	# MUST be ignored. Done here and not with the rewrite in `_read_request_line()`, where
+	# the header loop would then let a `Host:` line overwrite it and invert the MUST
+	if [ -n "$_REQUEST_AUTHORITY" ]; then
+		REQUEST_HEADERS['host']="$_REQUEST_AUTHORITY"
 	fi
 	# RFC 9112: §3.2 requires Host on 1.1, and §2.3 processes a higher 1.x minor as 1.1, so
-	# only 1.0 is exempt. Presence only: value unused (same tree served), duplicates overwrite
+	# only 1.0 is exempt. Presence only: the value is unused, the same tree being served
+	# whatever the authority — the header loop above is what makes it unambiguous
 	if [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
 		log "BAD REQUEST: $REQUEST_HTTP_VERSION request without a Host header"
 		send_error 400
 	fi
+}
+export -f _read_request_headers
 
-	# fill REQUEST_BODY if POST
-	if [ "$REQUEST_METHOD" = 'POST' ] && [ -v "REQUEST_HEADERS['content-length']" ]; then
-		local -r raw_length="${REQUEST_HEADERS['content-length']}"
-		# a bogus length makes `read` fail with a bash error, and a huge one makes it wait
-		# for bytes that will never come, so we check it before using it
-		if [[ ! $raw_length =~ ^0*([[:digit:]]+)$ ]]; then
-			log "BAD REQUEST: invalid Content-Length '$raw_length'"
-			send_error 400
-		fi
-		# the group drops the leading zeros `1*DIGIT` allows, so the cap below measures the
-		# magnitude and not the padding — same rule as the Range parser
-		local -r length="${BASH_REMATCH[1]}"
-		# outside `test`'s integer range, `-gt` errors out and counts as false, which would
-		# silently skip the limit. 10 digits is far above the limit anyway
-		if [ "${#length}" -gt 10 ] || [ "$length" -gt "$MAX_BODY_SIZE" ]; then
-			log "TOO LARGE: Content-Length '$length' over the $MAX_BODY_SIZE bytes limit"
-			send_error 413
-		fi
-		# `Content-Length` counts bytes, but `-N` counts characters: in a UTF-8 locale a
-		# multibyte body would make us wait for characters the client never sends
-		if ! LC_ALL=C read -rN "$length" line; then
-			send_error 400
-		fi
-		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
+# Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARAMETERS`.
+#
+# **Note:** this method is used by `read_request()` and shouldn't be called manually.
+#
+# Nothing is read unless the request is a POST carrying a `Content-Length`: a chunked body
+# is not supported and reads as no body at all. The length is checked against
+# `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
+#
+# A body of type `application/x-www-form-urlencoded` is decoded into
+# `REQUEST_BODY_PARAMETERS`.
+#
+# No `_bail_request` here: every bail-out below sits after the header loop, which has
+# already dumped the full request, so `send_error()` is called directly.
+#
+# Examples
+#
+#    _read_request_body
+function _read_request_body()
+{
+	if [ "$REQUEST_METHOD" != 'POST' ] || [ ! -v "REQUEST_HEADERS['content-length']" ]; then
+		return 0
+	fi
+	local -r raw_length="${REQUEST_HEADERS['content-length']}"
+	# a bogus length makes `read` fail with a bash error, and a huge one makes it wait
+	# for bytes that will never come, so we check it before using it
+	if [[ ! $raw_length =~ ^0*([[:digit:]]+)$ ]]; then
+		log "BAD REQUEST: invalid Content-Length '$raw_length'"
+		send_error 400
+	fi
+	# the group drops the leading zeros `1*DIGIT` allows, so the cap below measures the
+	# magnitude and not the padding — same rule as the Range parser
+	local -r length="${BASH_REMATCH[1]}"
+	# outside `test`'s integer range, `-gt` errors out and counts as false, which would
+	# silently skip the limit. 10 digits is far above the limit anyway
+	if [ "${#length}" -gt 10 ] || [ "$length" -gt "$MAX_BODY_SIZE" ]; then
+		log "TOO LARGE: Content-Length '$length' over the $MAX_BODY_SIZE bytes limit"
+		send_error 413
+	fi
+	# `Content-Length` counts bytes, but `-N` counts characters: in a UTF-8 locale a
+	# multibyte body would make us wait for characters the client never sends
+	local line
+	if ! LC_ALL=C read -rN "$length" line; then
+		send_error 400
+	fi
+	REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 
 $line"
-		REQUEST_BODY="$line"
-		# if content is of type "application/x-www-form-urlencoded", we parse it.
-		# a media type is case insensitive and can carry parameters, like `;charset=UTF-8`
-		local media_type="${REQUEST_HEADERS['content-type']:-}"
-		media_type="${media_type%%;*}"
-		media_type="${media_type//[[:space:]]/}"
-		if [ "${media_type,,}" = 'application/x-www-form-urlencoded' ]; then
-			if ! _check_encoding "$REQUEST_BODY"; then
-				log 'BAD REQUEST: invalid percent encoding in the body'
-				send_error 400
-			fi
-			# keep in sync with the twin loop in `parse_url`, which decodes the query string
-			local -a fields
-			IFS='&' read -ra fields <<< "$REQUEST_BODY"
-			local key value
-			local -i i
-			for (( i=0; i < ${#fields[@]}; i++ )); do
-				IFS='=' read -r key value <<< "${fields[i]}"
-				# an empty key is a fatal `bad array subscript`, and carries no information
-				if [ -z "$key" ]; then
-					continue
-				fi
-				# `+` is a space in urlencoded content
-				_url_decode key "${key//+/ }"
-				_url_decode value "${value//+/ }"
-				# read by the child scripts, which shellcheck can't see from here
-				# shellcheck disable=SC2034
-				REQUEST_BODY_PARAMETERS["$key"]="$value"
-			done
+	REQUEST_BODY="$line"
+	# if content is of type "application/x-www-form-urlencoded", we parse it.
+	# a media type is case insensitive and can carry parameters, like `;charset=UTF-8`
+	local media_type="${REQUEST_HEADERS['content-type']:-}"
+	media_type="${media_type%%;*}"
+	media_type="${media_type//[[:space:]]/}"
+	if [ "${media_type,,}" = 'application/x-www-form-urlencoded' ]; then
+		if ! _check_encoding "$REQUEST_BODY"; then
+			log 'BAD REQUEST: invalid percent encoding in the body'
+			send_error 400
 		fi
+		_parse_parameters "$REQUEST_BODY" 'REQUEST_BODY_PARAMETERS'
 	fi
+}
+export -f _read_request_body
+
+# Internal: Read the client request and set up environment.
+#
+# **Note:** this method is used by the dispatcher and shouldn't be called manually.
+#
+# Reads the input stream and fills the following variables (also run `parse_url()`):
+#
+# * `REQUEST_METHOD`
+# * `REQUEST_HTTP_VERSION`
+# * `REQUEST_HEADERS`
+# * `REQUEST_BODY`
+# * `REQUEST_BODY_PARAMETERS`
+# * `REQUEST_URL`
+# * `URL_BASE`
+# * `URL_PARAMETERS`
+#
+# The work happens in `_read_request_line()`, `_read_request_headers()` and
+# `_read_request_body()`, which read the same input stream and must run in this order, in
+# the current shell: a subshell or a command substitution would keep the variables — and
+# the error page of a bail-out — to itself.
+#
+# *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
+#
+# $1 - true when parsing from the standard input, false when re-parsing
+#      `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so
+#      that a request is not dumped once per script it goes through
+function read_request()
+{
+	_read_request_line "$1"
+	_read_request_headers "$1"
+	_read_request_body
 }
 export -f read_request

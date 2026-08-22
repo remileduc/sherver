@@ -70,6 +70,16 @@ a b' ]
 	[ "$output" = '[]' ]
 }
 
+@test "parse_url does not keep the parameters of a previous URL" {
+	# a child script may call it on a second URL in the same process: the request URL's
+	# keys must not survive into the second parse
+	run --separate-stderr with_request $'GET /index.sh?a=1 HTTP/1.1\nHost: localhost' \
+		'parse_url "/other?b=2"; printf "%s\n" "${#URL_PARAMETERS[@]}" "${URL_PARAMETERS[b]}"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '1
+2' ]
+}
+
 # ------------------------------------------------------- _check_encoding
 
 @test "_check_encoding accepts a properly encoded string" {
@@ -155,6 +165,18 @@ ko %g0' ]
 	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 301'
 	[ "$status" -eq 0 ]
 	[[ $output == 'HTTP/1.1 301 Moved Permanently'* ]]
+}
+
+@test "send_redirect knows the HTTP/1.1 redirects too" {
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 303'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.1 303 See Other'* ]]
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 307'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.1 307 Temporary Redirect'* ]]
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' 'send_redirect "/here" 308'
+	[ "$status" -eq 0 ]
+	[[ $output == 'HTTP/1.1 308 Permanent Redirect'* ]]
 }
 
 @test "send_redirect refuses a code that is not a redirect" {

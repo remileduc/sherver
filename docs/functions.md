@@ -98,6 +98,38 @@ will result in
      value='café'
 
 
+`_parse_parameters()`
+---------------------
+
+Internal: Fill an associative array from a string of urlencoded parameters.
+
+**Note:** this method is used by `parse_url()` and `_read_request_body()` and shouldn't be called manually.
+
+Takes the `key=value` pairs joined by `&` that a query string and an urlencoded body share, decodes both sides, and stores them in the array named by the second parameter. The array is emptied first, so a second parse never keeps keys from the first one. The string must have been accepted by `_check_encoding()` first.
+
+A parameter without a name is skipped, as an empty key is not a valid array subscript. A `+` decodes to a space, in the query string and in a form body both.
+
+* $1 - the urlencoded parameters (`key=value` pairs joined by `&`)
+* $2 - name of the associative array to fill
+
+Examples
+
+     _parse_parameters 'test=youpi&city=caf%C3%A9+ville' 'URL_PARAMETERS'
+
+will result in
+
+     URL_PARAMETERS=(
+         ['test']='youpi'
+         ['city']='café ville'
+     )
+
+
+`_parameters`
+-------------
+
+a child script may call `parse_url` on a second URL: keys must not accumulate
+
+
 `parse_url()`
 -------------
 
@@ -250,16 +282,16 @@ will create an answer that starts with
 
 Public: Send a redirect to the given URL as an answer.
 
-Takes the target URL, and optionally the response code: 302 (the default) for a temporary redirect, 301 for a permanent one — the two redirects `HTTP_RESPONSE` knows. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
+Takes the target URL, and optionally the response code, one of the five redirects of RFC 9110 §15.4: 302 (the default) for a temporary redirect, 301 for a permanent one, 303 to tell the client to GET the target, and 307/308 as their method-preserving counterparts — a strict client may repeat a POST on a 301/302, only 303 guarantees the switch to GET. Anything else is refused with a 500: `send_response` would die expanding an unknown code mid-answer, and the client would get nothing at all.
 
-The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form.
+The typical use is POST-redirect-GET, so that a refresh doesn't resubmit the form — that is 303.
 
 A target holding a CR or a LF is refused with a 500 the same way: it would split the Location header in two. The rest is the caller's business — a target built from the request is an open redirect unless the script checks it, and a full URL is legitimate here, so the library cannot tell the wanted ones from the others.
 
 Like the other `send_*` functions, it exits: nothing after it runs.
 
 * $1 - the URL to redirect to (a path like `/index.sh`, or a full URL)
-* $2 - Optional: the response code, 301 or 302 (default 302)
+* $2 - Optional: the response code, 301, 302, 303, 307 or 308 (default 302)
 
 Examples
 
@@ -280,7 +312,7 @@ Internal: Resolve the given path and check that it stays in the authorized direc
 
 Takes the authorized directory (relative to `SHERVER_ROOT`) and the path to resolve. The path is canonicalized, so neither `..` nor a symlink can be used to escape the directory.
 
-The result is stored in `RESOLVED_PATH` instead of being echoed, because this function exits on error: in a command substitution, the error page would be captured by the caller instead of being sent to the client.
+The result is stored in `_RESOLVED_PATH` instead of being echoed, because this function exits on error: in a command substitution, the error page would be captured by the caller instead of being sent to the client.
 
 Sends a 404 if the path is absolute, doesn't exist, or lands outside the authorized directory. We purposely don't use 403 to avoid leak of the File System
 
@@ -293,7 +325,7 @@ Examples
 
 will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
 
-     RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
+     _RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
 
 
 `_get_mimetype()`
@@ -385,9 +417,9 @@ will do the following
 
 Internal: Log a request parse failure, dump the request when relevant, and answer an error.
 
-**Note:** this method is used by `read_request()` and shouldn't be called manually.
+**Note:** this method is used by `_read_request_line()` and `_read_request_headers()` and shouldn't be called manually.
 
-Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse only (a child script re-parse would dump it once per script), the reason is always `log`ged, and `send_error()` ends the process — this function never returns. Only for the bail-outs *before* the end of the header loop: after that point, the first parse has already dumped the full request unconditionally, and this would dump it a second time.
+Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse only (a child script re-parse would dump it once per script), the reason is always `log`ged, and `send_error()` ends the process — this function never returns. Only for the bail-outs *before* the end of the header loop: after that point, the first parse has already dumped the full request unconditionally, and this would dump it a second time — which is why `_read_request_body()` calls `send_error()` directly.
 
 * $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
 * $2 - the reason, `log`ged as is
@@ -396,6 +428,74 @@ Owns the bail-out invariant of `read_request()`: the request is dumped on the fi
 Examples
 
      _bail_request 400 'BAD REQUEST: malformed request line' true
+
+
+`_read_request_line()`
+----------------------
+
+Internal: Read and validate the request line, and parse the URL.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Reads the first line of the input stream and fills `REQUEST_METHOD`, `REQUEST_URL` and `REQUEST_HTTP_VERSION` — plus `URL_BASE` and `URL_PARAMETERS` through `parse_url()`. `REQUEST_FULL_STRING` starts here, with the raw line.
+
+An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — is stored in `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
+
+* $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
+
+Examples
+
+     _read_request_line true
+
+
+`_read_request_headers()`
+-------------------------
+
+Internal: Read the header lines and fill `REQUEST_HEADERS`.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Reads the input stream up to the empty line that ends the headers, appending each line to `REQUEST_FULL_STRING` on the way.
+
+A header line is refused with a 400 when it is folded (obs-fold), has no colon, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority.
+
+Once the loop is done, the `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']` (RFC 9112 §3.2.2), and any other HTTP/1.1+ request without a `Host` header is refused with a 400.
+
+* $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
+
+Examples
+
+     _read_request_headers true
+
+
+`separator`
+-----------
+
+RFC 6265 §5.4 forbids repeating `Cookie`, but RFC 9113 §8.2.3 lets an HTTP/2 hop split it — and it recombines on `; `, never on a comma
+
+
+`separator`
+-----------
+
+RFC 9110 §5.2: a repeated field is the comma-separated list it stands for. Overwriting instead would drop what the client sent, and a header we compare as a whole (`If-None-Match`...) degrades to a full answer
+
+
+`_read_request_body()`
+----------------------
+
+Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARAMETERS`.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Nothing is read unless the request is a POST carrying a `Content-Length`: a chunked body is not supported and reads as no body at all. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
+
+A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
+
+No `_bail_request` here: every bail-out below sits after the header loop, which has already dumped the full request, so `send_error()` is called directly.
+
+Examples
+
+     _read_request_body
 
 
 `read_request()`
@@ -416,7 +516,7 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 * `URL_BASE`
 * `URL_PARAMETERS`
 
-An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — replaces `REQUEST_HEADERS['host']`. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
+The work happens in `_read_request_line()`, `_read_request_headers()` and `_read_request_body()`, which read the same input stream and must run in this order, in the current shell: a subshell or a command substitution would keep the variables — and the error page of a bail-out — to itself.
 
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 

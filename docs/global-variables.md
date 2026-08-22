@@ -44,6 +44,8 @@ Public: The headers from the request (associative array)
 
 The keys are lowercase, because HTTP header names are case insensitive: use `REQUEST_HEADERS['content-type']`, not `REQUEST_HEADERS['Content-Type']`.
 
+A header the client repeated is here as the `v1, v2` list it stands for (RFC 9110 §5.2). `Cookie` recombines on `; ` instead (RFC 9113 §8.2.3), and a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400.
+
 `REQUEST_BODY`
 --------------
 
