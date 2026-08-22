@@ -50,7 +50,13 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
   whenever `max-age` is there (RFC 9111 §5.3), and the one Sherver sent carried the `Date` itself, so
   it could only contradict the `private, max-age=60` next to it. `add_header 'Expires' …` still puts
   it back on an answer of your own
-- `HTTP_RESPONSE` gains the codes that go with all this: `206`, `416`, `501`, `505`
+- **a chunked request body is a `411`**, where it was silently read as no body at all: chunked
+  framing is still not decoded, but it is refused loudly, on any method. The rest of
+  RFC 9112 §6.3 comes with it: `Transfer-Encoding` next to a `Content-Length` — the request
+  smuggling pair — is a `400`, and so is any value other than a lone `chunked`: no coding will
+  ever be decoded here, so there is no `501` worth telling apart. A refused body is drained,
+  bounded, before the error is sent, so the answer is not lost to a TCP reset
+- `HTTP_RESPONSE` gains the codes that go with all this: `206`, `411`, `416`, `501`, `505`
 - `tail` and `head` join the external commands, for range answers only — busybox's are enough
 - add support for redirections 30X
 - add support for `Last-Modified` header
@@ -60,8 +66,8 @@ Deliberately left out, and worth knowing about:
 
 - **no keep alive**, and none planned: `Connection: close` on every response is a compliant opt-out
   (RFC 9112 §9.6), and one process per connection is the whole architecture
-- a **chunked request body** is read as no body at all, where it should get a `411`. No common
-  client sends one unprompted
+- a **chunked request body** is refused with a `411` rather than decoded. No common client
+  sends one unprompted
 - **`Expect: 100-continue`** is not answered: a client that waits for the interim response eats
   socat's timeout and sends anyway
 - a header **value** is taken as it comes: only the field name is validated, and a value is checked

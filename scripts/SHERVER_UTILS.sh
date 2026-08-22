@@ -129,6 +129,7 @@ function init_environment()
 		[403]='Forbidden'
 		[404]='Not Found'
 		[405]='Method Not Allowed'
+		[411]='Length Required'
 		[413]='Content Too Large'
 		[414]='URI Too Long'
 		[416]='Range Not Satisfiable'
@@ -1300,12 +1301,45 @@ $line"
 }
 export -f _read_request_headers
 
+# Internal: Discard what may still arrive of a request body before an error answer.
+#
+# **Note:** this method is used by `_read_request_body()` and shouldn't be called manually.
+#
+# Refusing a request whose body is still in flight and exiting leaves unread bytes in the
+# socket, and closing over them is a TCP reset that can destroy the error page before the
+# client reads it. This is the lingering close of every real server, bounded both ways so
+# a client can't pin the process: at most 64 kio are discarded, and a stalled stream is
+# waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
+#
+# Examples
+#
+#    _drain_request_input
+#    send_error 413
+function _drain_request_input()
+{
+	local -i i
+	local _discard
+	for (( i = 0; i < 16; i++ )); do
+		# `-N` so a newline doesn't end a read early, C locale so it counts bytes
+		if ! IFS= LC_ALL=C read -r -t 0.2 -N 4096 _discard; then
+			break
+		fi
+	done
+}
+export -f _drain_request_input
+
 # Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARAMETERS`.
 #
 # **Note:** this method is used by `read_request()` and shouldn't be called manually.
 #
-# Nothing is read unless the request is a POST carrying a `Content-Length`: a chunked body
-# is not supported and reads as no body at all. The length is checked against
+# A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it
+# is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone
+# `chunked` is the only value even recognized, and it is refused too — not decoded — with
+# the `411` the same section sanctions; any other value gets the `400` it MUSTs for a
+# non-final chunked, since no coding will ever be decoded here there is no `501` worth
+# telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header
+# merge's own rule) and the request goes on bodyless. Past that gate, nothing is read
+# unless the request is a POST carrying a `Content-Length`. The length is checked against
 # `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
 #
 # A body of type `application/x-www-form-urlencoded` is decoded into
@@ -1319,6 +1353,30 @@ export -f _read_request_headers
 #    _read_request_body
 function _read_request_body()
 {
+	if [ -v "REQUEST_HEADERS['transfer-encoding']" ]; then
+		# the TE + CL pair RFC 9112 §6.3 bans is a 400 on presence alone, emptied or not:
+		# the header's presence is what a downstream parser may frame on
+		if [ -v "REQUEST_HEADERS['content-length']" ]; then
+			log 'BAD REQUEST: both Transfer-Encoding and Content-Length'
+			_drain_request_input
+			send_error 400
+		fi
+		local -r te_value="${REQUEST_HEADERS['transfer-encoding']}"
+		# a lone chunked — coding names are case insensitive — is the only value even
+		# recognized, and it is refused too, not decoded, with the 411 §6.3 sanctions
+		if [ "${te_value,,}" = 'chunked' ]; then
+			log 'LENGTH REQUIRED: chunked Transfer-Encoding is not decoded'
+			_drain_request_input
+			send_error 411
+		# any other value is the 400 §6.3 MUSTs for a non-final chunked — no coding will
+		# ever be decoded here, so there is no 501 worth telling apart — while an emptied
+		# one names no coding at all (RFC 9110 §5.6.1) and the request goes on bodyless
+		elif [ -n "$te_value" ]; then
+			log "BAD REQUEST: unsupported Transfer-Encoding '$te_value'"
+			_drain_request_input
+			send_error 400
+		fi
+	fi
 	if [ "$REQUEST_METHOD" != 'POST' ] || [ ! -v "REQUEST_HEADERS['content-length']" ]; then
 		return 0
 	fi
@@ -1327,6 +1385,7 @@ function _read_request_body()
 	# for bytes that will never come, so we check it before using it
 	if [[ ! $raw_length =~ ^0*([[:digit:]]+)$ ]]; then
 		log "BAD REQUEST: invalid Content-Length '$raw_length'"
+		_drain_request_input
 		send_error 400
 	fi
 	# the group drops the leading zeros `1*DIGIT` allows, so the cap below measures the
@@ -1336,6 +1395,7 @@ function _read_request_body()
 	# silently skip the limit. 10 digits is far above the limit anyway
 	if [ "${#length}" -gt 10 ] || [ "$length" -gt "$MAX_BODY_SIZE" ]; then
 		log "TOO LARGE: Content-Length '$length' over the $MAX_BODY_SIZE bytes limit"
+		_drain_request_input
 		send_error 413
 	fi
 	# `Content-Length` counts bytes, but `-N` counts characters: in a UTF-8 locale a

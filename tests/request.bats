@@ -323,6 +323,56 @@ authority.example' ]
 	[ "$(status_code)" = '400' ]
 }
 
+@test "a chunked request body is a 411, not silently ignored" {
+	# RFC 9112 §6.3 sanctions the 411; decoding chunked framing is a known gap
+	request $'4\r\nbody\r\n0\r\n\r\n' 'POST / HTTP/1.1' 'Host: localhost' \
+		'Transfer-Encoding: chunked'
+	[ "$(status_code)" = '411' ]
+}
+
+@test "Transfer-Encoding next to a Content-Length is a 400" {
+	# the request smuggling pair of RFC 9112 §6.3, never read as either framing
+	request $'4\r\nbody\r\n0\r\n\r\n' 'POST / HTTP/1.1' 'Host: localhost' \
+		'Transfer-Encoding: chunked' 'Content-Length: 4'
+	[ "$(status_code)" = '400' ]
+}
+
+@test "Transfer-Encoding is refused on any method, not only POST" {
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Transfer-Encoding: chunked'
+	[ "$(status_code)" = '411' ]
+}
+
+@test "any Transfer-Encoding other than a lone chunked is a 400" {
+	# RFC 9112 §6.3 MUSTs the 400 whenever chunked is not the final coding — absent
+	# included — and nothing else will ever be decoded, so no 501 tells them apart
+	local value
+	for value in 'chunked, gzip' 'gzip' 'gzip, chunked'; do
+		request $'4\r\nbody\r\n0\r\n\r\n' 'POST / HTTP/1.1' 'Host: localhost' \
+			"Transfer-Encoding: $value"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
+@test "an emptied Transfer-Encoding names no coding and is served" {
+	# RFC 9110 §5.6.1: same rule as the header merge — an empty element is ignorable,
+	# so a value an intermediary emptied out must not refuse a bodyless request
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Transfer-Encoding:'
+	[ "$(status_code)" = '200' ]
+}
+
+@test "an emptied Transfer-Encoding next to a Content-Length is still a 400" {
+	# the pair is refused on presence alone: the header is what a downstream parser
+	# may frame on, emptied or not
+	request 'body' 'POST / HTTP/1.1' 'Host: localhost' 'Transfer-Encoding:' \
+		'Content-Length: 4'
+	[ "$(status_code)" = '400' ]
+}
+
+@test "transfer coding names are case insensitive" {
+	request '' 'GET / HTTP/1.1' 'Host: localhost' 'Transfer-Encoding: Chunked'
+	[ "$(status_code)" = '411' ]
+}
+
 # --------------------------------------------------------------- size limits
 
 @test "a request line over 8 kio is a 414" {

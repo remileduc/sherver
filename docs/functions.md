@@ -480,6 +480,21 @@ RFC 6265 §5.4 forbids repeating `Cookie`, but RFC 9113 §8.2.3 lets an HTTP/2 h
 RFC 9110 §5.2: a repeated field is the comma-separated list it stands for. Overwriting instead would drop what the client sent, and a header we compare as a whole (`If-None-Match`...) degrades to a full answer
 
 
+`_drain_request_input()`
+------------------------
+
+Internal: Discard what may still arrive of a request body before an error answer.
+
+**Note:** this method is used by `_read_request_body()` and shouldn't be called manually.
+
+Refusing a request whose body is still in flight and exiting leaves unread bytes in the socket, and closing over them is a TCP reset that can destroy the error page before the client reads it. This is the lingering close of every real server, bounded both ways so a client can't pin the process: at most 64 kio are discarded, and a stalled stream is waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
+
+Examples
+
+     _drain_request_input
+     send_error 413
+
+
 `_read_request_body()`
 ----------------------
 
@@ -487,7 +502,7 @@ Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARA
 
 **Note:** this method is used by `read_request()` and shouldn't be called manually.
 
-Nothing is read unless the request is a POST carrying a `Content-Length`: a chunked body is not supported and reads as no body at all. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
+A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length`. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
 
 A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
 

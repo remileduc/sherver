@@ -115,9 +115,12 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
 - the request line and headers are limited to 8 kio, bigger ones get a `414` or a `431` answer
-- a chunked request body is read as no body at all, where it should get a `411`, and
+- `Transfer-Encoding` is refused on any method: a chunked body is a `411` instead of being decoded —
+  resend it with a `Content-Length` *in place of* the `Transfer-Encoding`, the two together being
+  the request smuggling pair and a `400` — and any other value is a `400`, no coding will ever be
+  supported.
   `Expect: 100-continue` is not answered — a client that waits for it eats socat's timeout and sends
-  anyway. No common client does either unprompted
+  anyway. No common client sends chunked or `Expect` unprompted
 - header *values* are taken as they come: only the field name is validated, and a value is checked
   where it is read (`Content-Length`, `Range`) or not at all
 - no security (see [About Security](#about-security)).
