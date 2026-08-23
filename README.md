@@ -70,7 +70,7 @@ This is made to run with `Bash`. It may not work in another shell. The following
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
 - `date`, `realpath`, `stat`, `cat` and — to answer a byte range — `tail` and `head`: from `coreutils`
 	on a GNU system, but busybox's versions are enough (see below)
-- optionnal: `envsubst` if you want to do templating (comes in the package `gettext-base` in Debian, or something like `gettext-envsubst` as a smaller package in Alpine)
+- optional: `envsubst` if you want to do templating (comes in the package `gettext-base` in Debian, or something like `gettext-envsubst` as a smaller package in Alpine)
 - for development: `bats` and `shellcheck` for the tests. The two suites that open a port also want
 	`curl`, and the HTTPS one uses `openssl` to generate itself a throwaway certificate, falling back on
 	a committed one when there is no `openssl` around.
