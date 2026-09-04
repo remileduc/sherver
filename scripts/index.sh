@@ -70,15 +70,14 @@ $(html_escape "$REQUEST_FULL_STRING")
 		<p>Fill the input below and click on the <em>"Send"</em> button, and check the result!</p>
 		<input type="text" placeholder="Enter something" name="post-input" />
 		<input type="submit" value="Send POST request" name="post-button" />
-		<pre name="post-pre">
-		</pre>
+		<pre name="post-pre"></pre>
 	</section>
 
 	<section>
 		<h2>Image example</h2>
 		<p>Below you can find an example image that is automatically streamed by <em>Sherver</em>. Click to see full size.</p>
 		<figure>
-			<a href="/file/venise.webp"><img src="/file/venise.webp" alt="" style="width:40%"></a>
+			<a href="/file/venise.webp"><img src="/file/venise.webp" alt=""></a>
 			<figcaption>Venise, Italy. CC-BY</figcaption>
 		</figure>
 	</section>
