@@ -80,6 +80,14 @@ function filler()
 	[[ "$(body)" == *"You just sent me 'hello there'!"* ]]
 }
 
+@test "a body announced on a GET is drained, never handed to the script" {
+	# the body is discarded — read, so closing the socket over it cannot reset the
+	# answer away — and the script sees none of it
+	request 'ignored=1' 'GET /index.sh HTTP/1.1' 'Host: localhost' 'Content-Length: 9'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" != *'ignored'* ]]
+}
+
 @test "POST parses an urlencoded body, charset parameter and all" {
 	run --separate-stderr with_request \
 		'POST / HTTP/1.1
@@ -180,10 +188,11 @@ a b' ]
 	[[ "$(body)" == *'test: youpi'* ]]
 }
 
-@test "an absolute-form target satisfies the Host requirement on its own" {
-	# its authority is the host, so a 1.1 request needs no Host header
+@test "an absolute-form target does not excuse a missing Host header" {
+	# RFC 9112 §3.2's 400 has no absolute-form carve-out: §3.2.2 only voids the
+	# header's value, never its presence
 	request '' 'GET http://example.com/ HTTP/1.1'
-	[ "$(status_code)" = '200' ]
+	[ "$(status_code)" = '400' ]
 }
 
 @test "the authority of an absolute-form target overrides the Host header" {
@@ -556,6 +565,16 @@ X-Foo:$(printf '\t') two  words  " \
 	done
 }
 
+@test "a stray carriage return in a header line is a 400" {
+	# RFC 9110 §5.5. The first form ends `\r\r\n` on the wire: kept, it loses one CR per
+	# parse and the child re-parse reads another value than the dispatcher did
+	local header
+	for header in $'X-Foo: bar\r' $'X-Foo: b\rar' $'X-F\roo: bar'; do
+		request '' 'GET / HTTP/1.1' 'Host: localhost' "$header"
+		[ "$(status_code)" = '400' ]
+	done
+}
+
 @test "a header name is stored as data, never expanded" {
 	# the presence test used to build the subscript as a string that `[` re-expands, and a
 	# backquote and a `$` are both tchar: this request ran `mktemp` twice — once in the
@@ -689,6 +708,16 @@ X-Foo:' \
 	request '' 'GET /nope.sh HTTP/1.1' 'Host: localhost'
 	[[ "$(log_output)" == *'NOT FOUND'* ]]
 	[[ "$(log_output)" == *'- GET /nope.sh 404'* ]]
+}
+
+@test "a control byte in the request never reaches the log" {
+	# the access line and the reason lines both quote the target as received, before any
+	# validation: a raw ESC would inject terminal escapes or forged-looking lines into
+	# the journal, so `log` itself dots control bytes out — of every line it writes
+	request '' $'GET /\033[31mfake\rforged HTTP/1.1' 'Host: localhost'
+	[[ "$(log_output)" != *$'\033'* ]]
+	[[ "$(log_output)" != *$'\rforged'* ]]
+	[[ "$(log_output)" == *'- GET /.[31mfake.forged 404'* ]]
 }
 
 @test "index.sh escapes what the client sent instead of reflecting it" {

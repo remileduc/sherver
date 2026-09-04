@@ -35,6 +35,8 @@ Public: Log any messages in the error outut of the script (default is console).
 
 Takes as many arguments as needed. they will all be written, separated by newlines.
 
+Control bytes in a message become a `.`: these lines quote client bytes as received — the access line's target, the reason lines' header values — and a raw ESC or CR among them would write terminal escapes or forged-looking lines into the journal an admin greps. Only the newline is spared, as the separator this function itself documents; no client-sent string can carry one, `read` splits on it.
+
 Use it for what is worth keeping on a busy server: errors, and the one line per response written by `_send_header()`. Everything else belongs in `log_debug()`.
 
 Examples
@@ -219,6 +221,12 @@ will result in:
      Date: Thu, 04 Jul 2019 21:38:23 GMT
      Server: Sherver
      Cache-Control: private, max-age=60
+
+
+`TZ`
+----
+
+the same builtin as `send_file`'s validators: the `date` fork could fail under `set -e` with the status line already on the wire, truncating the response to it
 
 
 `send_response()`
@@ -457,9 +465,9 @@ Internal: Read the header lines and fill `REQUEST_HEADERS`.
 
 Reads the input stream up to the empty line that ends the headers, appending each line to `REQUEST_FULL_STRING` on the way.
 
-A header line is refused with a 400 when it is folded (obs-fold), has no colon, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority.
+A header line is refused with a 400 when it is folded (obs-fold), has no colon, still carries a CR once its own terminator is stripped, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2 and RFC 9110 §5.5). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority.
 
-Once the loop is done, the `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']` (RFC 9112 §3.2.2), and any other HTTP/1.1+ request without a `Host` header is refused with a 400.
+Once the loop is done, any HTTP/1.1+ request without a `Host` header is refused with a 400 — absolute-form included, RFC 9112 §3.2.2 only voids the header's value — then the `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']`.
 
 * $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
 
@@ -483,11 +491,11 @@ RFC 9110 §5.2: a repeated field is the comma-separated list it stands for. Over
 `_drain_request_input()`
 ------------------------
 
-Internal: Discard what may still arrive of a request body before an error answer.
+Internal: Discard what may still arrive of a request body that will not be read.
 
 **Note:** this method is used by `_read_request_body()` and shouldn't be called manually.
 
-Refusing a request whose body is still in flight and exiting leaves unread bytes in the socket, and closing over them is a TCP reset that can destroy the error page before the client reads it. This is the lingering close of every real server, bounded both ways so a client can't pin the process: at most 64 kio are discarded, and a stalled stream is waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
+Answering a request whose body is still in flight and exiting leaves unread bytes in the socket, and closing over them is a TCP reset that can destroy the answer — error page or 200 alike — before the client reads it. This is the lingering close of every real server, bounded both ways so a client can't pin the process: at most 64 kio are discarded, and a stalled stream is waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
 
 Examples
 
@@ -502,7 +510,7 @@ Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARA
 
 **Note:** this method is used by `read_request()` and shouldn't be called manually.
 
-A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length`. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
+A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length` — one announced on any other method is drained, unread, so the answer is not lost to a TCP reset. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
 
 A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
 

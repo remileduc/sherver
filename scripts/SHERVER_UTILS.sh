@@ -199,6 +199,12 @@ export -f init_environment
 #
 # Takes as many arguments as needed. they will all be written, separated by newlines.
 #
+# Control bytes in a message become a `.`: these lines quote client bytes as received —
+# the access line's target, the reason lines' header values — and a raw ESC or CR among
+# them would write terminal escapes or forged-looking lines into the journal an admin
+# greps. Only the newline is spared, as the separator this function itself documents;
+# no client-sent string can carry one, `read` splits on it.
+#
 # Use it for what is worth keeping on a busy server: errors, and the one line per
 # response written by `_send_header()`. Everything else belongs in `log_debug()`.
 #
@@ -211,7 +217,12 @@ export -f init_environment
 #    > HTTP/1.1 200 OK
 function log()
 {
-	printf '%s\n' "$@" >&2
+	local -a messages=("$@")
+	# the class spells out C0 minus the newline, plus DEL — a locale-proof range, same
+	# reason as `_HTTP_TOKEN_REGEX`. Expanded unquoted: quoted, the `-` turns literal
+	# and the range falls apart
+	local -r controls=$'\001-\011\013-\037\177'
+	printf '%s\n' "${messages[@]//[$controls]/.}" >&2
 }
 export -f log
 
@@ -458,7 +469,8 @@ function _send_header()
 {
 	# the access log: the only line a quiet server writes for a request it served. socat's
 	# EXEC sets the peer address; a `-` means no socat in front, like the filter-driven
-	# tests. A request too broken to have a method is answered before those variables are filled
+	# tests. A request too broken to have a method is answered before those variables are
+	# filled, and the raw target may hold control bytes — `log` itself is what dots them out
 	log "${SOCAT_PEERADDR:--} ${REQUEST_METHOD:--} ${_REQUEST_TARGET:--} $1"
 	# HTTP header
 	log_debug "> HTTP/1.1 $1 ${HTTP_RESPONSE[$1]}"
@@ -469,8 +481,9 @@ function _send_header()
 	# must ignore `Expires` whenever `max-age` is there (RFC 9111 §5.3), so the second field
 	# only ever gets to disagree with the first
 	local datenow
-	datenow=$(date -uR)
-	datenow=${datenow/%+0000/GMT}
+	# the same builtin as `send_file`'s validators: the `date` fork could fail under `set -e`
+	# with the status line already on the wire, truncating the response to it
+	TZ=UTC0 LC_ALL=C printf -v datenow '%(%a, %d %b %Y %H:%M:%S)T GMT' -1
 	add_header 'Date' "$datenow"
 	# rest of the headers
 	local i
@@ -1180,17 +1193,18 @@ export -f _read_request_line
 # Reads the input stream up to the empty line that ends the headers, appending each line to
 # `REQUEST_FULL_STRING` on the way.
 #
-# A header line is refused with a 400 when it is folded (obs-fold), has no colon, or has a
-# name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2).
+# A header line is refused with a 400 when it is folded (obs-fold), has no colon, still
+# carries a CR once its own terminator is stripped, or has a name that is not a token —
+# whitespace before the colon included (RFC 9112 §5, §5.1, §5.2 and RFC 9110 §5.5).
 # A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose
 # pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or
 # `Content-Type` with two different values is a 400: they frame the request, and none of
 # the three is a list. A repeated `Host` is ignored instead, without being compared, when
 # the request-target already carried an authority.
 #
-# Once the loop is done, the `_REQUEST_AUTHORITY` of an absolute-form target replaces
-# `REQUEST_HEADERS['host']` (RFC 9112 §3.2.2), and any other HTTP/1.1+ request without a
-# `Host` header is refused with a 400.
+# Once the loop is done, any HTTP/1.1+ request without a `Host` header is refused with a
+# 400 — absolute-form included, RFC 9112 §3.2.2 only voids the header's value — then the
+# `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']`.
 #
 # $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
 #
@@ -1216,6 +1230,12 @@ function _read_request_headers()
 		fi
 		REQUEST_FULL_STRING="$REQUEST_FULL_STRING
 $line"
+		# RFC 9110 §5.5: a CR surviving the line's own terminator must be refused or blanked,
+		# and refusing is this parser's way. Kept, a line ending `\r\r\n` loses one CR per
+		# parse, so the child re-parse of `REQUEST_FULL_STRING` reads another value than this
+		if [[ "$line" == *$'\r'* ]]; then
+			_bail_request 400 'BAD REQUEST: stray carriage return in a header line' "$1"
+		fi
 		# RFC 9112 §5.2: a line starting with whitespace is an obs-fold continuation, which a
 		# server must reject or splice. Rejecting is the honest half — spliced, it would have
 		# to be re-split here and re-folded in `REQUEST_FULL_STRING` for the child re-parse
@@ -1287,29 +1307,29 @@ $line"
 	if [ "$1" = true ]; then
 		log_debug "$REQUEST_FULL_STRING"
 	fi
+	# RFC 9112: §3.2 requires Host on 1.1 — absolute-form included, whose §3.2.2 only voids
+	# the header's value, never its presence — and §2.3 processes a higher 1.x minor as 1.1,
+	# so only 1.0 is exempt. Checked before the rewrite below, which would mask the absence
+	if [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
+		log "BAD REQUEST: $REQUEST_HTTP_VERSION request without a Host header"
+		send_error 400
+	fi
 	# RFC 9112 §3.2.2: with an absolute-form target, its authority wins and the `Host` header
 	# MUST be ignored. Done here and not with the rewrite in `_read_request_line()`, where
 	# the header loop would then let a `Host:` line overwrite it and invert the MUST
 	if [ -n "$_REQUEST_AUTHORITY" ]; then
 		REQUEST_HEADERS['host']="$_REQUEST_AUTHORITY"
 	fi
-	# RFC 9112: §3.2 requires Host on 1.1, and §2.3 processes a higher 1.x minor as 1.1, so
-	# only 1.0 is exempt. Presence only: the value is unused, the same tree being served
-	# whatever the authority — the header loop above is what makes it unambiguous
-	if [ "$REQUEST_HTTP_VERSION" != 'HTTP/1.0' ] && [ ! -v "REQUEST_HEADERS['host']" ]; then
-		log "BAD REQUEST: $REQUEST_HTTP_VERSION request without a Host header"
-		send_error 400
-	fi
 }
 export -f _read_request_headers
 
-# Internal: Discard what may still arrive of a request body before an error answer.
+# Internal: Discard what may still arrive of a request body that will not be read.
 #
 # **Note:** this method is used by `_read_request_body()` and shouldn't be called manually.
 #
-# Refusing a request whose body is still in flight and exiting leaves unread bytes in the
-# socket, and closing over them is a TCP reset that can destroy the error page before the
-# client reads it. This is the lingering close of every real server, bounded both ways so
+# Answering a request whose body is still in flight and exiting leaves unread bytes in the
+# socket, and closing over them is a TCP reset that can destroy the answer — error page or
+# 200 alike — before the client reads it. This is the lingering close of every real server, bounded both ways so
 # a client can't pin the process: at most 64 kio are discarded, and a stalled stream is
 # waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
 #
@@ -1341,8 +1361,10 @@ export -f _drain_request_input
 # non-final chunked, since no coding will ever be decoded here there is no `501` worth
 # telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header
 # merge's own rule) and the request goes on bodyless. Past that gate, nothing is read
-# unless the request is a POST carrying a `Content-Length`. The length is checked against
-# `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
+# unless the request is a POST carrying a `Content-Length` — one announced on any other
+# method is drained, unread, so the answer is not lost to a TCP reset. The length is
+# checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in
+# `REQUEST_FULL_STRING` too.
 #
 # A body of type `application/x-www-form-urlencoded` is decoded into
 # `REQUEST_BODY_PARAMETERS`.
@@ -1419,7 +1441,17 @@ function _read_request_body()
 		fi
 		expect_continue=true
 	done
-	if [ "$REQUEST_METHOD" != 'POST' ] || [ ! -v "REQUEST_HEADERS['content-length']" ]; then
+	# past the gate above only a `Content-Length` announces a body, and only a POST's is
+	# read. One announced on any other method is drained instead: left in the socket,
+	# closing over it is the TCP reset the refusals here guard against — on a 200 this time.
+	# First parse only: the parent has already emptied the socket for the child re-parse
+	if [ "$REQUEST_METHOD" != 'POST' ]; then
+		if [ "$1" = true ] && [ -v "REQUEST_HEADERS['content-length']" ]; then
+			_drain_request_input
+		fi
+		return 0
+	fi
+	if [ ! -v "REQUEST_HEADERS['content-length']" ]; then
 		return 0 # no body is OK
 	fi
 	local -r raw_length="${REQUEST_HEADERS['content-length']}"
@@ -1453,6 +1485,7 @@ function _read_request_body()
 	# multibyte body would make us wait for characters the client never sends
 	local line
 	if ! LC_ALL=C read -rN "$length" line; then
+		log "BAD REQUEST: body ended before the $length bytes announced"
 		send_error 400
 	fi
 	REQUEST_FULL_STRING="$REQUEST_FULL_STRING

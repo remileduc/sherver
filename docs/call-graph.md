@@ -151,7 +151,6 @@ External commands
 | `socat`    | `sherver.sh`                                                 |
 | `realpath` | `init_environment` (`SHERVER_ROOT`), `_resolve_path`         |
 | `stat`     | `send_file` (ETag, `Last-Modified`, `Content-Length`)        |
-| `date`     | `_send_header`                                               |
 | `cat`      | `send_file` (body), heredocs in `send_error` and `index.sh`  |
 | `tail`     | `send_file` (a range answer, piped into `head`)              |
 | `head`     | `send_file` (a range answer)                                 |

@@ -13,60 +13,37 @@ must not be exposed on Internet, at 1.0 as at 0.1 (see
 [About security](./README.md#about-security)).
 
 
-1.1 — 2026-08-21
+1.1 — 2026-08-22
 ----------------
 
 Sherver speaks HTTP/1.1 now, and behaves like it: the request line and the `Host` header are
 validated, `OPTIONS` is answered, and a file can be served by byte range — which is what makes
 `<video>` seeking work. Nothing was removed from the scripting API.
 
-- **answers in HTTP/1.1**, to a 1.0 client as well (RFC 9112 §2.3 — the version in the response
-  says what the server can do, not what the request was). `REQUEST_HTTP_VERSION` is validated
-  instead of merely parsed: anything that is not `HTTP/1.x` is a `400`, another major version a
-  `505`
-- **`Host` is mandatory** on an HTTP/1.1 request, missing it is a `400`. An HTTP/1.0 request
-  without `Host` stays legal
-- **header lines are validated**: a folded line (obs-fold), a line without a colon, a field name that
-  is not a token — whitespace before the colon included — and a repeated `Host`, `Content-Length` or
-  `Content-Type` carrying two different values are all a `400` now (RFC 9112 §5, §5.1, §5.2, §3.2 and
-  §6.3). A line made only of whitespace is a folded line too, and no longer reads as the empty line
-  that ends the headers. Any other repeated header reaches `REQUEST_HEADERS` as the `v1, v2` list it
-  stands for (RFC 9110 §5.2) instead of the last value alone — except `Cookie`, whose pairs
-  recombine on `; ` (RFC 9113 §8.2.3), the separator its own grammar uses. A field name is never expanded: it
-  reaches `REQUEST_HEADERS` as data, whatever it holds
-- **byte ranges**: every file answer announces `Accept-Ranges: bytes`, and a GET carrying a single
-  `Range: bytes=…` gets a `206` with its `Content-Range`. A range starting past the end of the file
-  is a `416`; a stale `If-Range`, several ranges, another unit or plain garbage are ignored and the
-  whole file is served, never an error
+- **answers in HTTP/1.1**, to a 1.0 client as well (RFC 9112 §2.3)
+- `REQUEST_HTTP_VERSION` is validated instead of merely parsed: anything that is not `HTTP/1.x` is a
+  `400`, another major version a `505`
+- **`Host` is mandatory** on an HTTP/1.1 request, missing it is a `400`. OK for HTTP/1.0 request
+- **header lines are validated**: sends `400` for bad requests (RFC 9112 §5, §5.1, §5.2, §3.2 and
+  §6.3, RFC 9110 §5.5).
+- Repeated header reaches `REQUEST_HEADERS` as the `v1, v2` list it stands for (RFC 9110 §5.2)
+  except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3)
+- **byte ranges**: advertise `Accept-Ranges: bytes`, and GET carrying a single `Range: bytes=…`
+  gets a `206` with its `Content-Range`. A range we can't use falls back to the full `200`;
+  only one that selects nothing — starting at or past the end — is a `416`
 - **`OPTIONS`**, answered by the dispatcher for any target, `*` included, with `Allow` and an empty
-  body. `PUT`, `DELETE`, `PATCH`, `TRACE` and `CONNECT` still get a `405`, which now carries `Allow`
-  as RFC 9110 §15.5.6 requires — **do the same before your own `send_error 405`**. A method that is
-  none of those gets a `501` instead of a `405`
+  body. `PUT`, `DELETE`, `PATCH`, `TRACE` and `CONNECT` still get a `405`.
+  **Do the same before your own `send_error 405`**.
 - **absolute-form request target**: `GET http://host/path HTTP/1.1` is accepted, as RFC 9112 §3.2.2
-  requires of a server. Scripts see the rewritten path in `REQUEST_URL`, and the authority in the
-  target replaces whatever `Host` the client sent
 - **an error is never stored**: `send_error` answers `Cache-Control: no-store` and drops any `ETag` and
   `Last-Modified` already set
-- **no more `Expires`**: `Cache-Control` is the only freshness field now. A cache must ignore `Expires`
-  whenever `max-age` is there (RFC 9111 §5.3), and the one Sherver sent carried the `Date` itself, so
-  it could only contradict the `private, max-age=60` next to it. `add_header 'Expires' …` still puts
-  it back on an answer of your own
+- **no more `Expires`**: `Cache-Control` is the only freshness field now.
 - **a chunked request body is a `411`**, where it was silently read as no body at all: chunked
-  framing is still not decoded, but it is refused loudly, on any method. The rest of
-  RFC 9112 §6.3 comes with it: `Transfer-Encoding` next to a `Content-Length` — the request
-  smuggling pair — is a `400`, and so is any value other than a lone `chunked`: no coding will
-  ever be decoded here, so there is no `501` worth telling apart. A refused body is drained,
-  bounded, before the error is sent, so the answer is not lost to a TCP reset
-- **`Expect: 100-continue` is answered** (RFC 9110 §10.1.1): the interim `HTTP/1.1 100 Continue`
-  line is written before the body is read, so a client that waits for it (curl does, on large
-  POSTs) no longer eats socat's timeout. A request refused before the body read gets its final
-  status instead, and an HTTP/1.0 client never gets the interim line
-- **an `Expect` naming anything but `100-continue` is a `417 Expectation Failed`**, on any
-  method: an expectation Sherver will never meet is refused right away instead of left to the
-  client's timeout. The value is a list, so a repeated `100-continue` is still met, and an
-  empty element names no expectation — an emptied value passes, like the emptied
-  `Transfer-Encoding`
-- `HTTP_RESPONSE` gains the codes that go with all this: `206`, `411`, `416`, `501`, `505`
+  framing is still not decoded, but it is refused loudly, on any method.
+- **`Expect: 100-continue` is answered** (RFC 9110 §10.1.1) with `HTTP/1.1 100 Continue`
+- **an `Expect` naming anything but `100-continue` is a `417 Expectation Failed`**
+- `HTTP_RESPONSE` gains the codes that go with all this:
+  `100`, `206`, `301`, `302`, `303`, `307`, `308`, `411`, `416`, `417`, `501`, `505`
 - `tail` and `head` join the external commands, for range answers only — busybox's are enough
 - add support for redirections 30X
 - add support for `Last-Modified` header
@@ -78,8 +55,9 @@ Deliberately left out, and worth knowing about:
   (RFC 9112 §9.6), and one process per connection is the whole architecture
 - a **chunked request body** is refused with a `411` rather than decoded. No common client
   sends one unprompted
-- a header **value** is taken as it comes: only the field name is validated, and a value is checked
-  where it is read (`Content-Length`, `Range`) or not at all
+- a header **value** is taken as it comes: past the stray-CR refusal of RFC 9110 §5.5, only the
+  field name is validated, and a value is checked where it is read (`Content-Length`, `Range`)
+  or not at all
 
 1.0 — 2026-08-14
 ----------------
