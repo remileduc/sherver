@@ -130,6 +130,7 @@ function init_environment()
 		[403]='Forbidden'
 		[404]='Not Found'
 		[405]='Method Not Allowed'
+		[408]='Request Timeout'
 		[411]='Length Required'
 		[413]='Content Too Large'
 		[414]='URI Too Long'
@@ -159,6 +160,13 @@ function init_environment()
 	# `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if
 	# every header character takes 4 bytes.
 	declare -rg MAX_HEADERS_SIZE=$((8 * 1024))
+	# Public: Seconds the whole request — line, headers and body — has to arrive, else a 408
+	#
+	# `socat -T` only drops a connection that goes *silent*: a client dripping one byte every
+	# 9 s would hold a dispatcher for the hours it takes to fill `MAX_HEADERS_SIZE`, and 32
+	# of them fill `max-children`. This is a deadline on the request instead, applied by
+	# `read_request()` to every read.
+	declare -rg MAX_REQUEST_TIME=10
 	# Internal: anchored regex matching a whole RFC 9110 §5.6.2 token
 	#
 	# Shared by the method check of `_read_request_line()` and the field name check of
@@ -178,6 +186,8 @@ function init_environment()
 	# Filled by `_read_request_line()` when the target proves absolute-form, applied over
 	# the `Host` header by `_read_request_headers()`.
 	declare -g _REQUEST_AUTHORITY=''
+	# Internal: the `SECONDS` value past which the request is a 408, see `read_request()`
+	declare -gi _REQUEST_DEADLINE=0
 	# Public: `true` when verbose logging is on, see `log_debug()`
 	#
 	# Read from the environment because that is the only channel that survives the exec into
@@ -1078,6 +1088,47 @@ function _bail_request()
 }
 export -f _bail_request
 
+# Internal: `read` from the request under the deadline of `read_request()`, or answer 408.
+#
+# **Note:** this method is used by the `_read_request_*()` functions and shouldn't be
+# called manually.
+#
+# Behaves like `read`: the arguments are handed to it as they are, behind a `-t` holding
+# the seconds left before `_REQUEST_DEADLINE`. Once the deadline is past — before the
+# call, or during the read — the request is a `408 Request Timeout` and this function
+# never returns. The timeout on the read itself is what bounds a client dripping a single
+# header line: a check between two lines would only run once the line is complete, which
+# is exactly what such a client never lets happen. The check before the read is needed
+# too, as `read -t 0` polls for input instead of failing. Nothing is dumped with the 408:
+# past the headers the request was dumped already, and before them there is little to
+# show. Any other failure of `read` — the end of the input — is returned as is, for the
+# caller to handle.
+#
+# `IFS=` and `LC_ALL=C` set in front of the call reach the `read` inside, like any
+# temporary assignment in front of a function call.
+#
+# $@ - the options and variable names for `read`
+#
+# Examples
+#
+#    while IFS= _read_with_timeout -r line; do  # ends at the end of the input
+function _read_with_timeout()
+{
+	local -i remaining=$(( _REQUEST_DEADLINE - SECONDS )) status=0
+	if [ "$remaining" -gt 0 ]; then
+		# the `-r` every caller passes is in `$@`, where shellcheck cannot see it
+		# shellcheck disable=SC2162
+		read -t "$remaining" "$@" || status=$?
+	fi
+	# `read -t` returns over 128 on a timeout; no time left before the read is the same
+	if [ "$remaining" -le 0 ] || [ "$status" -gt 128 ]; then
+		log "REQUEST TIMEOUT: request not complete after $MAX_REQUEST_TIME s"
+		send_error 408
+	fi
+	return "$status"
+}
+export -f _read_with_timeout
+
 # Internal: Read and validate the request line, and parse the URL.
 #
 # **Note:** this method is used by `read_request()` and shouldn't be called manually.
@@ -1089,7 +1140,8 @@ export -f _bail_request
 # An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to
 # the path it points at, and its authority — validated first — is stored in
 # `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not
-# a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
+# a path is refused with a 400, the asterisk form of `OPTIONS` excepted. A line that is not
+# complete by the deadline of `read_request()` is a 408.
 #
 # $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
 #
@@ -1101,7 +1153,7 @@ function _read_request_line()
 	local line
 	# this bail-out and the 414 below stay outside `_bail_request`: `REQUEST_FULL_STRING`
 	# is not filled yet, so its debug dump would be empty
-	if ! read -r line; then
+	if ! _read_with_timeout -r line; then
 		log 'BAD REQUEST: empty request'
 		send_error 400
 	fi
@@ -1200,7 +1252,8 @@ export -f _read_request_line
 # pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or
 # `Content-Type` with two different values is a 400: they frame the request, and none of
 # the three is a list. A repeated `Host` is ignored instead, without being compared, when
-# the request-target already carried an authority.
+# the request-target already carried an authority. Headers still incomplete at the deadline
+# of `read_request()` are a 408.
 #
 # Once the loop is done, any HTTP/1.1+ request without a `Host` header is refused with a
 # 400 — absolute-form included, RFC 9112 §3.2.2 only voids the header's value — then the
@@ -1218,7 +1271,7 @@ function _read_request_headers()
 	# obs-fold check below could never fire and a continuation carrying a colon would be
 	# de-folded into a header of its own — and a whitespace-only line would collapse to the
 	# empty string and `break` the loop, dropping every header behind it
-	while IFS= read -r line; do
+	while IFS= _read_with_timeout -r line; do
 		# checked first, for the same reasons as the request line
 		if [ $(( ${#REQUEST_FULL_STRING} + ${#line} + 1 )) -gt "$MAX_HEADERS_SIZE" ]; then
 			_bail_request 431 "TOO LARGE: headers over the $MAX_HEADERS_SIZE characters limit" "$1"
@@ -1364,7 +1417,8 @@ export -f _drain_request_input
 # unless the request is a POST carrying a `Content-Length` — one announced on any other
 # method is drained, unread, so the answer is not lost to a TCP reset. The length is
 # checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in
-# `REQUEST_FULL_STRING` too.
+# `REQUEST_FULL_STRING` too. It shares the deadline of `read_request()` with the head: a
+# body still incomplete when it passes is a 408, one cut short by the client a 400.
 #
 # A body of type `application/x-www-form-urlencoded` is decoded into
 # `REQUEST_BODY_PARAMETERS`.
@@ -1482,9 +1536,10 @@ function _read_request_body()
 		log_debug "> HTTP/1.1 100 ${HTTP_RESPONSE[100]}"
 	fi
 	# `Content-Length` counts bytes, but `-N` counts characters: in a UTF-8 locale a
-	# multibyte body would make us wait for characters the client never sends
+	# multibyte body would make us wait for characters the client never sends. Under the
+	# request deadline like the head: a dripped body would pin the process just the same
 	local line
-	if ! LC_ALL=C read -rN "$length" line; then
+	if ! LC_ALL=C _read_with_timeout -rN "$length" line; then
 		log "BAD REQUEST: body ended before the $length bytes announced"
 		send_error 400
 	fi
@@ -1527,6 +1582,14 @@ export -f _read_request_body
 # the current shell: a subshell or a command substitution would keep the variables — and
 # the error page of a bail-out — to itself.
 #
+# The whole request has `MAX_REQUEST_TIME` seconds to arrive, body included, from the
+# first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through
+# `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past
+# (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like
+# every other).
+# `SECONDS` has a one second resolution, so the budget is really between
+# `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
+#
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 #
 # $1 - true when parsing from the standard input, false when re-parsing
@@ -1534,6 +1597,7 @@ export -f _read_request_body
 #      that a request is not dumped once per script it goes through
 function read_request()
 {
+	_REQUEST_DEADLINE=$(( SECONDS + MAX_REQUEST_TIME ))
 	_read_request_line "$1"
 	_read_request_headers "$1"
 	_read_request_body "$1"

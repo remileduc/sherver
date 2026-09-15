@@ -56,8 +56,32 @@ function start_server()
 	return 1
 }
 
+# Internal: Open a connection, send `$1` at once, then one more byte every 2 s until the
+# server answers — or 40 s pass, when it never does. Prints the response.
+#
+# For the deadline tests: a byte every 2 s never trips socat's `-T 10`, which is an
+# inactivity timeout, so only the dispatcher's own clock can end such a request. The
+# client ignores SIGPIPE, as the server closing mid-drip is the very outcome under test:
+# a write that then fails must end the loop, not kill the client before its `wait`.
+#
+# $1 - the start of the request, sent at once
+function drip_request()
+{
+	timeout 40 bash -c '
+		exec 3<> "/dev/tcp/localhost/$1"
+		cat <&3 &
+		reader=$!
+		printf "%s" "$2" >&3
+		trap "" PIPE
+		while sleep 2 && kill -0 "$reader" 2> /dev/null; do
+			printf "x" >&3 2> /dev/null || break
+		done
+		wait
+	' drip "$SHERVER_PORT" "$1"
+}
+
 # Internal: Start the server and export the URL to reach it as `SHERVER_URL` (plus
-# `SHERVER_PORT` for the raw-socket test).
+# `SHERVER_PORT` for the raw-socket tests).
 function setup_file()
 {
 	command -v socat > /dev/null || skip 'socat is not installed'
@@ -200,4 +224,32 @@ function teardown_file()
 	timeout 2 bash -c "exec 3<>/dev/tcp/localhost/$SHERVER_PORT; sleep 1" || true
 	run curl -s -o /dev/null -w '%{http_code}' "$SHERVER_URL/"
 	[ "$output" = '200' ]
+}
+
+# The request deadline: the only clock socat has is an inactivity timeout, so these are
+# the two tests in the suite that need a real socket and real time — about 12 s each.
+
+@test "a client dripping a header line is answered 408 by the deadline" {
+	local -i started=$SECONDS
+	run --separate-stderr drip_request $'GET / HTTP/1.1\r\nHost: l'
+	local -ri took=$(( SECONDS - started ))
+	[ "$status" -eq 0 ]
+	[[ "${lines[0]}" == 'HTTP/1.1 408 Request Timeout'* ]]
+	# MAX_REQUEST_TIME is 10 s: well under 20 proves the dispatcher ended it, not the
+	# client giving up at 40
+	[ "$took" -lt 20 ]
+	grep -q 'REQUEST TIMEOUT: request not complete' "$SHERVER_LOG"
+	# and the slot is free again
+	run curl -s -o /dev/null -w '%{http_code}' "$SHERVER_URL/"
+	[ "$output" = '200' ]
+}
+
+@test "a client dripping its body is answered 408 by the same deadline" {
+	local -i started=$SECONDS
+	run --separate-stderr drip_request \
+		$'POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1000\r\n\r\nhello'
+	local -ri took=$(( SECONDS - started ))
+	[ "$status" -eq 0 ]
+	[[ "${lines[0]}" == 'HTTP/1.1 408 Request Timeout'* ]]
+	[ "$took" -lt 20 ]
 }

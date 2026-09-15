@@ -23,6 +23,10 @@ sherver.sh ──exec──> socat ──fork+exec (per connection)──> dispa
 (`index.sh`, `page.sh`, ...). A Bash endpoint starts by calling `init_environment` again, which
 re-parses the request from the exported `REQUEST_FULL_STRING` instead of stdin.
 
+Two clocks run on a connection: `socat -T 10` drops one that goes *silent*, in either direction,
+and the dispatcher gives the request itself `MAX_REQUEST_TIME` seconds to arrive — every read of
+`read_request` goes through `_read_with_timeout`, and the 408 is the dispatcher's, never socat's.
+
 Function graph
 --------------
 
@@ -43,6 +47,7 @@ flowchart TD
         init_environment
         read_request
         bail_request["_bail_request (exit)"]
+        read_with_timeout[_read_with_timeout]
         parse_url
         check_encoding[_check_encoding]
         url_decode[_url_decode]
@@ -63,6 +68,8 @@ flowchart TD
     dispatcher --> send_response
 
     init_environment --> read_request
+    read_request --> read_with_timeout
+    read_with_timeout --> send_error
     read_request --> bail_request
     read_request --> check_encoding
     read_request --> parse_url
@@ -100,22 +107,24 @@ flowchart TD
 
 The same edges as a table, with the process boundaries spelled out:
 
-| Caller             | Calls                                                                           |
-| ------------------ | ------------------------------------------------------------------------------- |
-| `sherver.sh`       | `socat` (exec: socat becomes the listener)                                      |
-| `dispatcher.sh`    | `init_environment`, then `send_response` (OPTIONS), `send_file` or `run_script` |
-| `init_environment` | `read_request`                                                                  |
-| `read_request`     | `_bail_request`, `_check_encoding`, `parse_url`, `_url_decode`, `send_error`    |
-| `_bail_request`    | `send_error`                                                                    |
-| `parse_url`        | `_check_encoding`, `_url_decode`, `send_error`                                  |
-| `run_script`       | `parse_url`, `_resolve_path`, `send_error`, the endpoint (exec)                 |
-| `send_file`        | `_resolve_path`, `_get_mimetype`, `send_response`, `_send_header`, `send_error` |
-| `_resolve_path`    | `send_error`                                                                    |
-| `send_error`       | `send_response`                                                                 |
-| `send_redirect`    | `send_response`, `send_error`                                                   |
-| `send_response`    | `_send_header`                                                                  |
-| `scripts/index.sh` | `init_environment`, `html_escape`, `send_response`                              |
-| `scripts/page.sh`  | `init_environment`, `send_error`, `send_file`                                   |
+| Caller                 | Calls                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `sherver.sh`           | `socat` (exec: socat becomes the listener)                                      |
+| `dispatcher.sh`        | `init_environment`, then `send_response` (OPTIONS), `send_file` or `run_script` |
+| `init_environment`     | `read_request`                                                                  |
+| `read_request`         | `_read_with_timeout`, `_bail_request`, `_check_encoding`, `parse_url`,          |
+|                        | `_url_decode`, `send_error`                                                     |
+| `_read_with_timeout`   | `send_error`                                                                    |
+| `_bail_request`        | `send_error`                                                                    |
+| `parse_url`            | `_check_encoding`, `_url_decode`, `send_error`                                  |
+| `run_script`           | `parse_url`, `_resolve_path`, `send_error`, the endpoint (exec)                 |
+| `send_file`            | `_resolve_path`, `_get_mimetype`, `send_response`, `_send_header`, `send_error` |
+| `_resolve_path`        | `send_error`                                                                    |
+| `send_error`           | `send_response`                                                                 |
+| `send_redirect`        | `send_response`, `send_error`                                                   |
+| `send_response`        | `_send_header`                                                                  |
+| `scripts/index.sh`     | `init_environment`, `html_escape`, `send_response`                              |
+| `scripts/page.sh`      | `init_environment`, `send_error`, `send_file`                                   |
 
 `send_file` answers a 304 through `send_response`, but streams the body itself: `_send_header` then
 `cat` for a 200, or `tail -c | head -c` for a 206. `_send_header` writes the status line, the headers
@@ -128,17 +137,19 @@ Error codes
 -----------
 
 Which function sends which code through `send_error` (`read_request` routes its early parse
-failures through `_bail_request`, which owns the dump-and-log convention):
+failures through `_bail_request`, which owns the dump-and-log convention, and its reads through
+`_read_with_timeout`, which owns the 408):
 
-| Function           | Codes                                       | Sent when                                                 |
-| ------------------ | ------------------------------------------- | --------------------------------------------------------- |
-| `read_request`     | 400, 405, 411, 413, 414, 417, 431, 501, 505 | bad request line, header or body; method; version; limits |
-| `parse_url`        | 400                                         | invalid percent encoding                                  |
-| `_resolve_path`    | 404, 500                                    | path missing or escaping the tree — never 403             |
-| `run_script`       | 404, 500                                    | endpoint not executable, or it exited non-zero            |
-| `send_file`        | 404, 416                                    | not a readable regular file; unsatisfiable `Range`        |
-| `send_redirect`    | 500                                         | no target, a CR or LF in it, or non-redirect code         |
-| `scripts/page.sh`  | 404, 405                                    | missing `page` parameter; method not GET or HEAD          |
+| Function               | Codes                                       | Sent when                                                 |
+| ---------------------- | ------------------------------------------- | --------------------------------------------------------- |
+| `read_request`         | 400, 405, 411, 413, 414, 417, 431, 501, 505 | bad request line, header or body; method; version; limits |
+| `_read_with_timeout`   | 408                                         | request not whole after `MAX_REQUEST_TIME` seconds        |
+| `parse_url`            | 400                                         | invalid percent encoding                                  |
+| `_resolve_path`        | 404, 500                                    | path missing or escaping the tree — never 403             |
+| `run_script`           | 404, 500                                    | endpoint not executable, or it exited non-zero            |
+| `send_file`            | 404, 416                                    | not a readable regular file; unsatisfiable `Range`        |
+| `send_redirect`        | 500                                         | no target, a CR or LF in it, or non-redirect code         |
+| `scripts/page.sh`      | 404, 405                                    | missing `page` parameter; method not GET or HEAD          |
 
 `read_request` also writes the interim `HTTP/1.1 100 Continue` itself, raw — never through
 `_send_header`, which would log an access line and consume `RESPONSE_HEADERS`.

@@ -99,6 +99,13 @@ Public: Biggest request line + headers we accept to read, in characters
 
 They land in `REQUEST_FULL_STRING` too, so they share the 128 kio limit of `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if every header character takes 4 bytes.
 
+`MAX_REQUEST_TIME`
+------------------
+
+Public: Seconds the whole request — line, headers and body — has to arrive, else a 408
+
+`socat -T` only drops a connection that goes *silent*: a client dripping one byte every 9 s would hold a dispatcher for the hours it takes to fill `MAX_HEADERS_SIZE`, and 32 of them fill `max-children`. This is a deadline on the request instead, applied by `read_request()` to every read.
+
 `DEBUG_LOG`
 -----------
 

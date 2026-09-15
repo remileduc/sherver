@@ -116,6 +116,8 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
 - the request line and headers are limited to 8 kio, bigger ones get a `414` or a `431` answer
+- a request has 10 s to arrive whole — line, headers and body — or it gets a `408` answer: `socat`'s own
+  timeout only catches a client that goes silent, not one that drips a byte at a time
 - `Transfer-Encoding` is refused on any method: a chunked body is a `411` instead of being decoded —
   resend it with a `Content-Length` *in place of* the `Transfer-Encoding`, the two together being
   the request smuggling pair and a `400` — and any other value is a `400`, no coding will ever be
@@ -302,7 +304,8 @@ array `REQUEST_BODY_PARAMETERS`.
 
 The body is limited to 64 kio (see `MAX_BODY_SIZE`), and a bigger one gets a `413` answer. The limit is
 not arbitrary: the body ends up in `REQUEST_FULL_STRING` which is exported, and Linux refuses to run a
-command when a single environment variable is bigger than 128 kio.
+command when a single environment variable is bigger than 128 kio. The body also counts against the
+10 s the whole request has to arrive (see `MAX_REQUEST_TIME`): one still incomplete by then is a `408`.
 
 A client that announces `Expect: 100-continue` on a POST carrying a `Content-Length` (curl does, on
 large POSTs) gets the interim `HTTP/1.1 100 Continue` line before the body is read, so it never waits

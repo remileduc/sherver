@@ -196,7 +196,7 @@ printf 'Sherver %s started, listening on %s (%s%s)\n' "$SHERVER_VERSION" "$port"
 IFS=','
 # exec: socat replaces us, so systemd tracks and signals it instead of a bash wrapper
 exec socat \
-	`# -T: drop a connection that goes silent, so a client can't pin a forked child forever` \
+	`# -T: drop a connection gone silent (a client not reading its answer); the request itself is clocked by the dispatcher` \
 	-T 10 \
 	"${socat_options[*]}" \
 	EXEC:'./dispatcher.sh'

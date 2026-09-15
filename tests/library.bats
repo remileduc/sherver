@@ -250,3 +250,37 @@ image/jpeg' ]
 	[ "$status" -eq 0 ]
 	[ "$output" = 'a&amp;b&lt;c' ]
 }
+
+# ------------------------------------------------------ _read_with_timeout
+
+@test "_read_with_timeout reads like read while time is left" {
+	# `read_request` just set the deadline MAX_REQUEST_TIME seconds ahead
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'_read_with_timeout -r x <<< "some input"; printf "%s %s\n" "$?" "$x"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '0 some input' ]
+}
+
+@test "_read_with_timeout returns the end of the input to its caller" {
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'rc=0; _read_with_timeout -r x < /dev/null || rc=$?; printf "%s\n" "$rc"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '1' ]
+}
+
+@test "_read_with_timeout answers 408 once the deadline is past, without reading" {
+	# `read -t 0` would poll and happily return the input, so the check has to come first
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'_REQUEST_DEADLINE=$SECONDS; _read_with_timeout -r x <<< "some input"; echo reached'
+	[[ "${lines[0]}" == 'HTTP/1.1 408 Request Timeout'* ]]
+	[[ "$output" != *'reached'* ]]
+	[[ "$stderr" == *'REQUEST TIMEOUT: request not complete after'* ]]
+}
+
+@test "an IFS= in front of _read_with_timeout reaches the read inside" {
+	# the header loop relies on it to keep a leading SP/HTAB — the obs-fold check
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'IFS= _read_with_timeout -r x <<< "  folded"; printf "[%s]\n" "$x"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '[  folded]' ]
+}
