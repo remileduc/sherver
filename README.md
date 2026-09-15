@@ -59,9 +59,10 @@ Presentation
 
 ### How to run ###
 
-Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` (default is `8080`), and
-`--debug` before it to get verbose logs: `./sherver.sh --debug 8080`. `./sherver.sh --version` prints the
-version and exits; [CHANGELOG.md](./CHANGELOG.md) says what each one brought.
+Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` or `./sherver.sh --port 8080` (default is `8080`), and
+`--debug` to get verbose logs: `./sherver.sh --debug 8080`. `--ipv4` listens on IPv4 only, `--tls`
+serves HTTPS (see [docs/https.md](./docs/https.md)). `./sherver.sh --help` prints the manual with
+every flag.
 
 ### Requirements ###
 
@@ -377,9 +378,8 @@ All this behaviors can be changed by editing the file [dispatcher.sh](./dispatch
 ### HTTPS ###
 
 Sherver can serve over HTTPS, so a sniffer on the network only sees an encrypted stream. TLS is
-terminated by `socat` itself: generate a self-signed certificate, swap the `TCP6-LISTEN` line for
-the `OPENSSL-LISTEN` ones in [sherver.sh](./sherver.sh), and import the certificate on your
-devices. The whole procedure — and what it does *not* protect against — is in
+terminated by `socat` itself: generate a self-signed certificate, start with `./sherver.sh --tls`,
+and import the certificate on your devices. The whole procedure — and what it does *not* protect against — is in
 [docs/https.md](./docs/https.md).
 
 ### Run as a service (daemon) ###

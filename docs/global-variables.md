@@ -105,3 +105,5 @@ They land in `REQUEST_FULL_STRING` too, so they share the 128 kio limit of `MAX_
 Public: `true` when verbose logging is on, see `log_debug()`
 
 Read from the environment because that is the only channel that survives the exec into a child script: `sherver.sh --debug` exports `SHERVER_DEBUG`, and so does `systemd`.
+
+`sherver.sh --tls` exports `SHERVER_TLS=1` through the same channel. Nothing in the library reads it: it is there for a script that needs to know whether it is served over HTTPS, typically to build an absolute URL.

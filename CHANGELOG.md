@@ -48,6 +48,8 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
 - add support for redirections 30X
 - add support for `Last-Modified` header
 - add IP in logs
+- **command line flags** replace editing `sherver.sh`: `--port N`, `--ipv4`, `--tls`,
+  `--certs DIR`, `--debug`, `--version`, and `--help`
 
 Deliberately left out, and worth knowing about:
 

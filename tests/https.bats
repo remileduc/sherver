@@ -15,12 +15,11 @@
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
 #
-# The TLS listener. `tests/server.bats` follows whichever mode `sherver.sh` is
-# configured in, which is plain TCP in a fresh checkout, so this suite starts the
-# `OPENSSL-LISTEN` recipe of `docs/https.md` itself: the encrypted path is covered
-# whatever the checkout is set to. Everything above the socket is tested elsewhere —
-# what is checked here is that TLS terminates in socat and the dispatcher still
-# answers through it, unchanged and unaware.
+# The TLS listener. `tests/server.bats` starts `sherver.sh` in plain TCP, so this
+# suite starts the `OPENSSL-LISTEN` recipe of `docs/https.md` — what `./sherver.sh
+# --tls` builds — itself. Everything above the socket is tested elsewhere — what is
+# checked here is that TLS terminates in socat and the dispatcher still answers
+# through it, unchanged and unaware.
 #
 # The certificate is generated per run, which also checks that the recipe of the docs
 # produces something socat and curl accept. `tests/localhost.pem` — certificate and key
@@ -30,11 +29,17 @@
 
 load 'test_helper'
 
+bats_require_minimum_version 1.5.0
+
 # Internal: Get a certificate and start a TLS listener on a free port.
 #
-# The socat options are the ones `docs/https.md` tells the user to uncomment, except
-# for the certificate: the real one lives in `certs/` at the root of the checkout, and
-# a test has no business writing a private key there.
+# The socat address is composed here rather than taken from `./sherver.sh --tls`,
+# because the suite degrades where the launcher refuses: a socat too old for one
+# option gets the recipe without it, a host without IPv6 gets `pf=ip4`. The first
+# test checks the launcher builds the very string this suite starts from. The
+# certificate is the one thing that legitimately differs: the real one lives in
+# `certs/` at the root of the checkout, and a test has no business writing a private
+# key there.
 #
 # Only a socat that cannot speak TLS at all stops the suite. A missing `openssl` or a
 # socat too old for one option costs the test that needs it, not the other seven.
@@ -48,14 +53,16 @@ function setup_file()
 	# grepping for it would match the long name and then fail to start on 1.8.0
 	export SHERVER_MIN_PROTO=''
 	if socat -hhh | grep -q 'openssl-min-proto-version'; then
-		SHERVER_MIN_PROTO=',openssl-min-proto-version=TLS1.3'
+		SHERVER_MIN_PROTO=1
 	fi
 
 	# whatever went wrong is in there, and there is nowhere else to read it from once
 	# bats has swallowed the output of a failing setup
 	local -r log="$BATS_FILE_TMPDIR/socat.log"
+	# cert.pem and key.pem, the names `--certs` expects: the recipe test hands the
+	# launcher this directory
 	export SHERVER_CERT="$BATS_FILE_TMPDIR/cert.pem"
-	local key="$BATS_FILE_TMPDIR/key.pem"
+	local -r key="$BATS_FILE_TMPDIR/key.pem"
 	# the recipe from docs/https.md, but named after localhost so that curl can verify
 	# it without `-k`, and valid for a day as it dies with the suite. `basicConstraints`
 	# is spelled out rather than left to the `-x509` default, which openssl only sets
@@ -67,13 +74,22 @@ function setup_file()
 		-addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' 2> "$log"
 	then
 		# no openssl, or one that chokes on the recipe: the point of the suite is the
-		# transport, so fall back on the fixture rather than test nothing
+		# transport, so fall back on the fixture rather than test nothing. It holds both
+		# objects, and OpenSSL reads the one it is asked for out of either copy
 		cat -- "$log"
 		printf 'falling back on tests/localhost.pem\n'
-		SHERVER_CERT="$REPO_ROOT/tests/localhost.pem"
-		key="$SHERVER_CERT"
-		[ -f "$SHERVER_CERT" ] || skip 'no certificate to serve with'
+		[ -f "$REPO_ROOT/tests/localhost.pem" ] || skip 'no certificate to serve with'
+		cp -- "$REPO_ROOT/tests/localhost.pem" "$SHERVER_CERT"
+		cp -- "$REPO_ROOT/tests/localhost.pem" "$key"
 	fi
+
+	# the recipe of docs/https.md on this certificate, in the one comma-separated
+	# address sherver.sh joins its array into (which is also why no path here may
+	# contain a comma). The listener below is this string with at most two options
+	# taken out, and the port swapped
+	export SHERVER_RECIPE="OPENSSL-LISTEN:8080,pf=ip6,ipv6only=0,cert=$SHERVER_CERT,key=$key"
+	SHERVER_RECIPE+=',verify=0,openssl-min-proto-version=TLS1.3'
+	SHERVER_RECIPE+=',max-children=32,backlog=32,reuseaddr,fork,end-close'
 
 	local -i port
 	local family
@@ -82,11 +98,9 @@ function setup_file()
 	for family in 'pf=ip6,ipv6only=0' 'pf=ip4'; do
 		# a range of its own: tests/server.bats takes 18080 and up
 		for (( port = 18120; port < 18160; port++ )); do
-			# one comma separated address, the way sherver.sh joins its array (which is
-			# also why no path here may contain a comma)
-			local address="OPENSSL-LISTEN:$port,$family"
-			address+=",cert=$SHERVER_CERT,key=$key,verify=0$SHERVER_MIN_PROTO"
-			address+=',max-children=32,backlog=32,reuseaddr,fork,end-close'
+			local address="${SHERVER_RECIPE/:8080,/:$port,}"
+			address="${address/pf=ip6,ipv6only=0/$family}"
+			[ -n "$SHERVER_MIN_PROTO" ] || address="${address/,openssl-min-proto-version=TLS1.3/}"
 			( cd -- "$REPO_ROOT" && exec socat -T 10 "$address" EXEC:./dispatcher.sh ) \
 				> /dev/null 2> "$log" &
 			local -i pid=$!
@@ -129,16 +143,27 @@ function teardown_file()
 	fi
 }
 
-@test "the HTTPS recipe in sherver.sh is the one this suite runs" {
-	# the options are spelled out in setup_file rather than read from sherver.sh, whose
-	# cert path is $PWD/certs. This is what keeps that copy from drifting silently
-	local block
-	block=$(grep -A 2 'OPENSSL-LISTEN' "$REPO_ROOT/sherver.sh")
-	[[ "$block" == *'OPENSSL-LISTEN:${1:-8080}'* ]]
-	[[ "$block" == *"'pf=ip6' 'ipv6only=0'"* ]]
-	[[ "$block" == *'cert=$PWD/certs/cert.pem'* ]]
-	[[ "$block" == *'key=$PWD/certs/key.pem'* ]]
-	[[ "$block" == *"'verify=0' 'openssl-min-proto-version=TLS1.3'"* ]]
+@test "--tls builds the recipe this suite runs" {
+	# sherver.sh execs whatever `socat` resolves to, so a stub first in PATH receives the
+	# exact address the flags built, without a port being opened. This is what keeps
+	# the copy in setup_file from drifting away from the launcher silently
+	local -r stub="$BATS_TEST_TMPDIR/bin"
+	mkdir -- "$stub"
+	printf '#!/bin/sh\nprintf "%%s\\n" "$@"\n' > "$stub/socat"
+	chmod +x "$stub/socat"
+	# the banner goes to stderr: only socat's argv is on stdout, one word per line
+	run --separate-stderr env PATH="$stub:$PATH" "$REPO_ROOT/sherver.sh" \
+		--tls --certs "$BATS_FILE_TMPDIR"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = '-T' ]
+	[ "${lines[2]}" = "$SHERVER_RECIPE" ]
+	[ "${lines[3]}" = 'EXEC:./dispatcher.sh' ]
+	# and --ipv4 is the same recipe on the other family, what the fallback above binds
+	run --separate-stderr env PATH="$stub:$PATH" "$REPO_ROOT/sherver.sh" \
+		--tls --certs "$BATS_FILE_TMPDIR" --ipv4
+	[ "$status" -eq 0 ]
+	[ "${lines[2]}" = "${SHERVER_RECIPE/pf=ip6,ipv6only=0/pf=ip4}" ]
+	[[ "$stderr" == *'(https, IPv4 only)'* ]]
 }
 
 @test "a client that verifies the certificate is answered" {

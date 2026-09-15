@@ -66,24 +66,31 @@ Two placement rules:
   are the served directories, everything else is unreachable through HTTP by construction.
 - it is in `.gitignore`; the private key never gets committed.
 
-Enable it in sherver.sh
------------------------
-
-The listening address is one line in the `socat_options` array of [sherver.sh](../sherver.sh).
-Comment the `TCP6-LISTEN` line and uncomment the three `OPENSSL-*` ones:
+Enable it
+---------
 
 ```bash
-#socat_options+=("TCP6-LISTEN:${1:-8080}" 'ipv6only=0')
-socat_options+=("OPENSSL-LISTEN:${1:-8080}" 'pf=ip6' 'ipv6only=0')
-socat_options+=("cert=$PWD/certs/cert.pem" "key=$PWD/certs/key.pem")
-socat_options+=('verify=0' 'openssl-min-proto-version=TLS1.3')
+./sherver.sh --tls
+```
+
+That is the whole switch. `--certs DIR` points at another folder holding `cert.pem` and `key.pem`
+(only meaningful with `--tls`, refused without it; a relative `DIR` is taken from where you type
+the command). `--ipv4` gives an IPv4-only listener, `--port` and `--debug` work as before, and
+`./sherver.sh --help` lists them all. The launcher refuses to start when it cannot read one of
+the two files, naming it, rather than letting socat fail on it later.
+
+What the flag builds, in the `socat_options` array of [sherver.sh](../sherver.sh), is the
+`OPENSSL-LISTEN` address in place of the `TCP6-LISTEN` one:
+
+```
+OPENSSL-LISTEN:8080,pf=ip6,ipv6only=0,cert=certs/cert.pem,key=certs/key.pem,verify=0,openssl-min-proto-version=TLS1.3
 ```
 
 What each option does:
 
 - `pf=ip6` + `ipv6only=0` recreate what `TCP6-LISTEN` implied: one dual-stack socket answering
-  IPv4 and IPv6. Replace both with `pf=ip4` for an IPv4-only listener. `max-children`, `backlog`,
-  `reuseaddr`, `fork` and `end-close` are unchanged — they apply to the underlying TCP listener.
+  IPv4 and IPv6. `--ipv4` puts `pf=ip4` in their place. `max-children`, `backlog`, `reuseaddr`,
+  `fork` and `end-close` follow unchanged — they apply to the underlying TCP listener.
 - `verify=0` is **required**: socat's TLS listener demands a *client* certificate by default and
   drops browsers that don't present one. Leaving verification on is the mutual TLS setup below.
 - `openssl-min-proto-version=TLS1.3` refuses SSLv3 and TLS 1.0/1.1/1.2 outright. It also refuses
@@ -91,24 +98,24 @@ What each option does:
   connect. The option needs socat 1.7.4 or later, under that full name: the short `min-proto-version`
   is an alias socat only grew in 1.8.1, and 1.8.0 — what Ubuntu 24.04 ships — refuses to start on it.
 
-Restart, and the same port now talks HTTPS — plain `http://` requests to it will fail, there is no
-redirect (socat is one listener, not a web server).
+The same port now talks HTTPS — plain `http://` requests to it will fail, there is no redirect
+(socat is one listener, not a web server). The flag also exports `SHERVER_TLS=1`, so a script that
+builds an absolute URL can tell which scheme it is served over.
 
-Nothing changes for [the service](../systemd/sherver.service) but the ownership of the key: it sits
-in the checkout, which `ProtectHome=read-only` still allows reading, yet `chmod 600` means a
-certificate generated as root is unreadable by `User=sherver`. Then socat dies at startup on
-`SSL_CTX_use_certificate_file()` and `Restart=always` loops on it, so `chown -R sherver:sherver certs`
-after generating.
+For [the service](../systemd/sherver.service), add `--tls` to its `ExecStart` line. The one other
+thing that changes is the ownership of the key: it sits in the checkout, which `ProtectHome=read-only`
+still allows reading, yet `chmod 600` means a certificate generated as root is unreadable by
+`User=sherver`. The launcher then exits at startup naming the file and `Restart=always` loops on it,
+so `chown -R sherver:sherver certs` after generating.
 
-Two suites cover this. `tests/https.bats` starts a TLS listener with the options above and a
-certificate it generates in its own temporary directory, so the encrypted path is tested whatever
-this checkout is configured for; it is also what fails if the recipe above is edited without
-updating it. It only gives up when socat cannot speak TLS at all: without the `openssl` command it
-serves the committed `tests/localhost.pem` instead, and a socat too old for `min-proto-version`
-costs the one test that asserts TLS 1.2 is refused. `tests/server.bats` follows the configured mode instead: it reads the listening line
-from `sherver.sh` and talks TLS to it when the `OPENSSL-LISTEN` one is active (with `curl -k`, as
-your certificate's names need not include `localhost`). The other suites drive the dispatcher
-directly and never see a socket.
+Two suites cover this. `tests/https.bats` starts a TLS listener with the address above and a
+certificate it generates in its own temporary directory, and its first test runs `./sherver.sh
+--tls` against a stub `socat` to assert the flag builds that same address; it is what fails if
+either copy is edited without the other. It only gives up when socat cannot speak TLS at all:
+without the `openssl` command it serves the committed `tests/localhost.pem` instead, and a socat too
+old for `min-proto-version` costs the one test that asserts TLS 1.2 is refused. `tests/server.bats`
+starts `./sherver.sh` in plain TCP and checks the command line itself. The other suites drive the
+dispatcher directly and never see a socket.
 
 Test it:
 
@@ -147,12 +154,12 @@ Going further: mutual TLS
 For a server whose scripts run privileged things, you can invert the logic: require a *client*
 certificate, so a device without one cannot even open a connection, let alone reach an endpoint.
 Generate a second certificate/key pair per the same recipe, install it on your devices, and replace
-the `verify=0` line — socat ignores `cafile` as long as verification is off, so leaving it in gives
-a listener that never asks for a client certificate:
+`verify=0` in the `--tls` branch of [sherver.sh](../sherver.sh) — no flag covers this one. Socat
+ignores `cafile` as long as verification is off, so leaving `verify=0` in gives a listener that never
+asks for a client certificate:
 
 ```bash
-#socat_options+=('verify=0' 'openssl-min-proto-version=TLS1.3')
-socat_options+=("cafile=$PWD/certs/clients.pem" 'openssl-min-proto-version=TLS1.3')
+socat_options+=("cafile=$certs/clients.pem" 'openssl-min-proto-version=TLS1.3')
 ```
 
 where `clients.pem` is the concatenation of the client certificates you accept. Browsers will
