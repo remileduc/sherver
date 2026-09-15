@@ -17,6 +17,12 @@
 
 set -efu
 
+# 4.4, not 4.3: expanding an empty array under `set -u` was an error before, and the code does it
+if (( BASH_VERSINFO[0] < 5 && (BASH_VERSINFO[0] < 4 || BASH_VERSINFO[1] < 4) )); then
+	printf 'Sherver needs bash >= 4.4, this is %s\n' "$BASH_VERSION" >&2
+	exit 1
+fi
+
 declare -r SHERVER_VERSION='1.1'
 
 # Internal: Print the manual on stdout.
@@ -72,7 +78,8 @@ OPTIONS
 
 EXIT STATUS
 	The process is socat's once started. Before that: 2 on a wrong
-	command line, 1 on an unusable certificate or checkout path.
+	command line, 1 on an unusable certificate or checkout path, or
+	a bash older than 4.4.
 
 ENVIRONMENT
 	SHERVER_DEBUG, SHERVER_TLS

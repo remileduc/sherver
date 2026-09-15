@@ -17,6 +17,12 @@
 
 set -efu
 
+# 4.4, not 4.3: expanding an empty array under `set -u` was an error before, and the code does it
+if (( BASH_VERSINFO[0] < 5 && (BASH_VERSINFO[0] < 4 || BASH_VERSINFO[1] < 4) )); then
+	printf 'Sherver needs bash >= 4.4, this is %s\n' "$BASH_VERSION" >&2
+	exit 1
+fi
+
 export LC_ALL=C.UTF-8
 
 source 'scripts/SHERVER_UTILS.sh'

@@ -66,7 +66,7 @@ every flag.
 
 ### Requirements ###
 
-This is made to run with `Bash`. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
+This is made to run with `Bash` 4.4 or later; `sherver.sh` refuses to start on an older one. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
 - `realpath`, `stat`, `cat` and — to answer a byte range — `tail` and `head`: from `coreutils`

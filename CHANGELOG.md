@@ -50,6 +50,8 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
 - add IP in logs
 - **command line flags** replace editing `sherver.sh`: `--port N`, `--ipv4`, `--tls`,
   `--certs DIR`, `--debug`, `--version`, and `--help`
+- **bash 4.4 is the floor**, checked at startup by `sherver.sh`, `dispatcher.sh` and
+  `tests/lint.sh`
 
 Deliberately left out, and worth knowing about:
 
