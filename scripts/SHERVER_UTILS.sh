@@ -1586,9 +1586,8 @@ export -f _read_request_body
 # first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through
 # `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past
 # (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like
-# every other).
-# `SECONDS` has a one second resolution, so the budget is really between
-# `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
+# every other). `SECONDS` has a one second resolution, so the budget is really
+# between `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
 #
 # *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 #

@@ -56,7 +56,8 @@ Why these options:
 - `-newkey ec ... prime256v1`: an EC P-256 key — the current default choice, smaller and faster
   than RSA. `-nodes` leaves the key unencrypted, since no one will be there to type a passphrase
   when the service starts.
-- `-days 3650` a renewal cadence that is fine if you rather not think about it for a decade.
+- `-days 825`: the longest validity iOS 13+ and macOS 10.15+ accept for a TLS server certificate,
+  self-signed ones included.
 - OpenSSL 3 marks a self-signed certificate `CA:TRUE` on its own, which is what lets Android
   import it as a trusted authority.
 
@@ -83,7 +84,7 @@ What the flag builds, in the `socat_options` array of [sherver.sh](../sherver.sh
 `OPENSSL-LISTEN` address in place of the `TCP6-LISTEN` one:
 
 ```
-OPENSSL-LISTEN:8080,pf=ip6,ipv6only=0,cert=certs/cert.pem,key=certs/key.pem,verify=0,openssl-min-proto-version=TLS1.3
+OPENSSL-LISTEN:8080,pf=ip6,ipv6only=0,cert=/path/to/sherver/certs/cert.pem,key=/path/to/sherver/certs/key.pem,verify=0,openssl-min-proto-version=TLS1.3
 ```
 
 What each option does:
@@ -146,7 +147,7 @@ The one thing *not* to do is get used to clicking through the warning: that habi
 active-MITM hole described at the top.
 
 When the certificate expires, generate a new one the same way and re-import it everywhere — with
-3650 days validity that is a once-a-decade chore.
+825 days validity that is a chore every two years or so.
 
 Going further: mutual TLS
 -------------------------

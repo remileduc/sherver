@@ -563,8 +563,7 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 
 The work happens in `_read_request_line()`, `_read_request_headers()` and `_read_request_body()`, which read the same input stream and must run in this order, in the current shell: a subshell or a command substitution would keep the variables — and the error page of a bail-out — to itself.
 
-The whole request has `MAX_REQUEST_TIME` seconds to arrive, body included, from the first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like every other). `SECONDS` has a one second resolution, so the budget is really between
-* `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
+The whole request has `MAX_REQUEST_TIME` seconds to arrive, body included, from the first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like every other). `SECONDS` has a one second resolution, so the budget is really between `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
 
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 
