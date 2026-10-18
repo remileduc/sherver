@@ -1,0 +1,8 @@
+# Keeps the `uses:` lines of .github/workflows up to date. Only the actions: the code
+# itself has no package manager, and tomdoc.sh is fetched unpinned on purpose (see ci.yml)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

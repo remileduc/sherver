@@ -13,7 +13,7 @@ must not be exposed on Internet, at 1.0 as at 0.1 (see
 [About security](./README.md#about-security)).
 
 
-1.1 — 2026-08-22
+1.1 — 2026-10-18
 ----------------
 
 Sherver speaks HTTP/1.1 now, and behaves like it: the request line and the `Host` header are
@@ -65,6 +65,10 @@ Deliberately left out, and worth knowing about:
 - a header **value** is taken as it comes: past the stray-CR refusal of RFC 9110 §5.5, only the
   field name is validated, and a value is checked where it is read (`Content-Length`, `Range`)
   or not at all
+
+Special thanks for this release:
+
+- https://github.com/vaibhav8a @vaibhav8a for his typo fix
 
 1.0 — 2026-08-14
 ----------------
