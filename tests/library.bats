@@ -250,3 +250,57 @@ image/jpeg' ]
 	[ "$status" -eq 0 ]
 	[ "$output" = 'a&amp;b&lt;c' ]
 }
+
+# ------------------------------------------------------ _read_with_timeout
+
+@test "_read_with_timeout reads like read while time is left" {
+	# `read_request` just set the deadline MAX_REQUEST_TIME seconds ahead
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'_read_with_timeout -r x <<< "some input"; printf "%s %s\n" "$?" "$x"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '0 some input' ]
+}
+
+@test "_read_with_timeout returns the end of the input to its caller" {
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'rc=0; _read_with_timeout -r x < /dev/null || rc=$?; printf "%s\n" "$rc"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '1' ]
+}
+
+@test "_read_with_timeout answers 408 once the deadline is past, without reading" {
+	# `read -t 0` would poll and happily return the input, so the check has to come first
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'_REQUEST_DEADLINE=$SECONDS; _read_with_timeout -r x <<< "some input"; echo reached'
+	[[ "${lines[0]}" == 'HTTP/1.1 408 Request Timeout'* ]]
+	[[ "$output" != *'reached'* ]]
+	[[ "$stderr" == *'REQUEST TIMEOUT: request not complete after'* ]]
+}
+
+@test "an IFS= in front of _read_with_timeout reaches the read inside" {
+	# the header loop relies on it to keep a leading SP/HTAB — the obs-fold check
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'IFS= _read_with_timeout -r x <<< "  folded"; printf "[%s]\n" "$x"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '[  folded]' ]
+}
+
+@test "an LC_ALL=C in front of _read_with_timeout reaches the read inside" {
+	# the body read relies on it so that -N counts bytes, as Content-Length does: two
+	# characters without it, the two bytes of the one é with it
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'export LC_ALL=C.UTF-8; _read_with_timeout -rN 2 x <<< "éa"; printf "[%s]" "$x";
+		LC_ALL=C _read_with_timeout -rN 2 x <<< "éa"; printf "[%s]\n" "$x"'
+	[ "$status" -eq 0 ]
+	[ "$output" = '[éa][é]' ]
+}
+
+@test "_read_with_timeout answers 408 when the read itself outlasts the deadline" {
+	# the -t on each read is what bounds a client dripping a single line: there is
+	# no "between two lines" to check on until that line is complete
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
+		'_REQUEST_DEADLINE=$(( SECONDS + 1 )); _read_with_timeout -r x < <(sleep 3); echo reached'
+	[[ "${lines[0]}" == 'HTTP/1.1 408 Request Timeout'* ]]
+	[[ "$output" != *'reached'* ]]
+	[[ "$stderr" == *'REQUEST TIMEOUT: request not complete after'* ]]
+}

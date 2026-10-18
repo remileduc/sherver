@@ -99,9 +99,18 @@ Public: Biggest request line + headers we accept to read, in characters
 
 They land in `REQUEST_FULL_STRING` too, so they share the 128 kio limit of `MAX_BODY_SIZE`. 8 kio (what nginx and Apache use) leaves room for a full body even if every header character takes 4 bytes.
 
+`MAX_REQUEST_TIME`
+------------------
+
+Public: Seconds the whole request — line, headers and body — has to arrive, else a 408
+
+`socat -T` only drops a connection that goes *silent*: a client dripping one byte every 9 s would hold a dispatcher for the hours it takes to fill `MAX_HEADERS_SIZE`, and 32 of them fill `max-children`. This is a deadline on the request instead, applied by `read_request()` to every read.
+
 `DEBUG_LOG`
 -----------
 
 Public: `true` when verbose logging is on, see `log_debug()`
 
 Read from the environment because that is the only channel that survives the exec into a child script: `sherver.sh --debug` exports `SHERVER_DEBUG`, and so does `systemd`.
+
+`sherver.sh --tls` exports `SHERVER_TLS=1` through the same channel. Nothing in the library reads it: it is there for a script that needs to know whether it is served over HTTPS, typically to build an absolute URL.

@@ -438,6 +438,24 @@ Examples
      _bail_request 400 'BAD REQUEST: malformed request line' true
 
 
+`_read_with_timeout()`
+----------------------
+
+Internal: `read` from the request under the deadline of `read_request()`, or answer 408.
+
+**Note:** this method is used by the `_read_request_*()` functions and shouldn't be called manually.
+
+Behaves like `read`: the arguments are handed to it as they are, behind a `-t` holding the seconds left before `_REQUEST_DEADLINE`. Once the deadline is past — before the call, or during the read — the request is a `408 Request Timeout` and this function never returns. The timeout on the read itself is what bounds a client dripping a single header line: a check between two lines would only run once the line is complete, which is exactly what such a client never lets happen. The check before the read is needed too, as `read -t 0` polls for input instead of failing. Nothing is dumped with the 408: past the headers the request was dumped already, and before them there is little to show. Any other failure of `read` — the end of the input — is returned as is, for the caller to handle.
+
+`IFS=` and `LC_ALL=C` set in front of the call reach the `read` inside, like any temporary assignment in front of a function call.
+
+* $@ - the options and variable names for `read`
+
+Examples
+
+     while IFS= _read_with_timeout -r line; do  # ends at the end of the input
+
+
 `_read_request_line()`
 ----------------------
 
@@ -447,7 +465,7 @@ Internal: Read and validate the request line, and parse the URL.
 
 Reads the first line of the input stream and fills `REQUEST_METHOD`, `REQUEST_URL` and `REQUEST_HTTP_VERSION` — plus `URL_BASE` and `URL_PARAMETERS` through `parse_url()`. `REQUEST_FULL_STRING` starts here, with the raw line.
 
-An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — is stored in `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted.
+An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — is stored in `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted. A line that is not complete by the deadline of `read_request()` is a 408.
 
 * $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
 
@@ -465,7 +483,7 @@ Internal: Read the header lines and fill `REQUEST_HEADERS`.
 
 Reads the input stream up to the empty line that ends the headers, appending each line to `REQUEST_FULL_STRING` on the way.
 
-A header line is refused with a 400 when it is folded (obs-fold), has no colon, still carries a CR once its own terminator is stripped, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2 and RFC 9110 §5.5). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority.
+A header line is refused with a 400 when it is folded (obs-fold), has no colon, still carries a CR once its own terminator is stripped, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2 and RFC 9110 §5.5). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority. Headers still incomplete at the deadline of `read_request()` are a 408.
 
 Once the loop is done, any HTTP/1.1+ request without a `Host` header is refused with a 400 — absolute-form included, RFC 9112 §3.2.2 only voids the header's value — then the `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']`.
 
@@ -510,7 +528,7 @@ Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARA
 
 **Note:** this method is used by `read_request()` and shouldn't be called manually.
 
-A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length` — one announced on any other method is drained, unread, so the answer is not lost to a TCP reset. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too.
+A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length` — one announced on any other method is drained, unread, so the answer is not lost to a TCP reset. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too. It shares the deadline of `read_request()` with the head: a body still incomplete when it passes is a 408, one cut short by the client a 400.
 
 A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
 
@@ -544,6 +562,8 @@ Reads the input stream and fills the following variables (also run `parse_url()`
 * `URL_PARAMETERS`
 
 The work happens in `_read_request_line()`, `_read_request_headers()` and `_read_request_body()`, which read the same input stream and must run in this order, in the current shell: a subshell or a command substitution would keep the variables — and the error page of a bail-out — to itself.
+
+The whole request has `MAX_REQUEST_TIME` seconds to arrive, body included, from the first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like every other). `SECONDS` has a one second resolution, so the budget is really between `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
 
 *Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
 

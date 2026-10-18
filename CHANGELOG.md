@@ -42,12 +42,19 @@ validated, `OPTIONS` is answered, and a file can be served by byte range — whi
   framing is still not decoded, but it is refused loudly, on any method.
 - **`Expect: 100-continue` is answered** (RFC 9110 §10.1.1) with `HTTP/1.1 100 Continue`
 - **an `Expect` naming anything but `100-continue` is a `417 Expectation Failed`**
+- **a request has 10 s to arrive whole**, body included, or it is a `408 Request Timeout`: `socat -T`
+  only ever dropped a client gone silent, and one dripping a byte every 9 s held a dispatcher for
+  hours. `MAX_REQUEST_TIME` is the knob, next to `MAX_BODY_SIZE` and `MAX_HEADERS_SIZE`
 - `HTTP_RESPONSE` gains the codes that go with all this:
-  `100`, `206`, `301`, `302`, `303`, `307`, `308`, `411`, `416`, `417`, `501`, `505`
+  `100`, `206`, `301`, `302`, `303`, `307`, `308`, `408`, `411`, `416`, `417`, `501`, `505`
 - `tail` and `head` join the external commands, for range answers only — busybox's are enough
 - add support for redirections 30X
 - add support for `Last-Modified` header
 - add IP in logs
+- **command line flags** replace editing `sherver.sh`: `--port N`, `--ipv4`, `--tls`,
+  `--certs DIR`, `--debug`, `--version`, and `--help`
+- **bash 4.4 is the floor**, checked at startup by `sherver.sh`, `dispatcher.sh` and
+  `tests/lint.sh`
 
 Deliberately left out, and worth knowing about:
 

@@ -59,13 +59,14 @@ Presentation
 
 ### How to run ###
 
-Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` (default is `8080`), and
-`--debug` before it to get verbose logs: `./sherver.sh --debug 8080`. `./sherver.sh --version` prints the
-version and exits; [CHANGELOG.md](./CHANGELOG.md) says what each one brought.
+Just clone and run `./sherver.sh`. Then, you should be able to connect to [localhost:8080](http://localhost:8080/). You can pass the port to listen on as a parameter: `./sherver.sh 8080` or `./sherver.sh --port 8080` (default is `8080`), and
+`--debug` to get verbose logs: `./sherver.sh --debug 8080`. `--ipv4` listens on IPv4 only, `--tls`
+serves HTTPS (see [docs/https.md](./docs/https.md)). `./sherver.sh --help` prints the manual with
+every flag.
 
 ### Requirements ###
 
-This is made to run with `Bash`. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
+This is made to run with `Bash` 4.4 or later; `sherver.sh` refuses to start on an older one. It may not work in another shell. The following tools need to be present in the system (note that they are all part of the default installation of Debian):
 - `socat` to run the server.
 	- you can use `netcat` instead, but it doesn't work well with concurrent HTTP requests
 - `realpath`, `stat`, `cat` and — to answer a byte range — `tail` and `head`: from `coreutils`
@@ -115,6 +116,8 @@ Even if it sounds awesome, Sherver still has the following limitations:
 - no shared state between requests: each one is a brand new process, so nothing is cached server side
 - POST bodies are limited to 64 kio, bigger ones get a `413` answer (see [POST requests](#post-requests))
 - the request line and headers are limited to 8 kio, bigger ones get a `414` or a `431` answer
+- a request has 10 s to arrive whole — line, headers and body — or it gets a `408` answer: `socat`'s own
+  timeout only catches a client that goes silent, not one that drips a byte at a time
 - `Transfer-Encoding` is refused on any method: a chunked body is a `411` instead of being decoded —
   resend it with a `Content-Length` *in place of* the `Transfer-Encoding`, the two together being
   the request smuggling pair and a `400` — and any other value is a `400`, no coding will ever be
@@ -301,7 +304,8 @@ array `REQUEST_BODY_PARAMETERS`.
 
 The body is limited to 64 kio (see `MAX_BODY_SIZE`), and a bigger one gets a `413` answer. The limit is
 not arbitrary: the body ends up in `REQUEST_FULL_STRING` which is exported, and Linux refuses to run a
-command when a single environment variable is bigger than 128 kio.
+command when a single environment variable is bigger than 128 kio. The body also counts against the
+10 s the whole request has to arrive (see `MAX_REQUEST_TIME`): one still incomplete by then is a `408`.
 
 A client that announces `Expect: 100-continue` on a POST carrying a `Content-Length` (curl does, on
 large POSTs) gets the interim `HTTP/1.1 100 Continue` line before the body is read, so it never waits
@@ -377,9 +381,8 @@ All this behaviors can be changed by editing the file [dispatcher.sh](./dispatch
 ### HTTPS ###
 
 Sherver can serve over HTTPS, so a sniffer on the network only sees an encrypted stream. TLS is
-terminated by `socat` itself: generate a self-signed certificate, swap the `TCP6-LISTEN` line for
-the `OPENSSL-LISTEN` ones in [sherver.sh](./sherver.sh), and import the certificate on your
-devices. The whole procedure — and what it does *not* protect against — is in
+terminated by `socat` itself: generate a self-signed certificate, start with `./sherver.sh --tls`,
+and import the certificate on your devices. The whole procedure — and what it does *not* protect against — is in
 [docs/https.md](./docs/https.md).
 
 ### Run as a service (daemon) ###
