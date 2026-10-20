@@ -23,7 +23,7 @@ REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
 
 # Public: Absolute path to the library, for the tests that source it.
-declare -gr LIBRARY="$REPO_ROOT/scripts/SHERVER_UTILS.sh"
+declare -gr LIBRARY="$REPO_ROOT/lib/SHERVER.sh"
 
 # Public: File holding the response of the last request. See `request()`.
 declare -g RESPONSE=''

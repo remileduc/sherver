@@ -11,7 +11,7 @@ Processes
 
 ```
 sherver.sh ──exec──> socat ──fork+exec (per connection)──> dispatcher.sh
-                                                               │ source scripts/SHERVER_UTILS.sh
+                                                               │ source lib/SHERVER.sh
                                                                │ init_environment
                                                                ├─ method OPTIONS     ──> send_response 200
                                                                ├─ /file/*            ──> send_file
@@ -33,7 +33,8 @@ Function graph
 Two kinds of edges are left out to keep the graph readable: everything may call `log` and
 `log_debug`, and everything that sets a response header does it through `add_header`. Functions
 marked `exit` are terminal: they write the response and end the process, so nothing after them
-runs — including in their callers.
+runs — including in their callers. `read_request` stands for its three `_read_request_*` helpers
+too, which is why `lib/body.sh` (the body reader and the drain) and `lib/log.sh` draw no box.
 
 ```mermaid
 flowchart TD
@@ -43,23 +44,31 @@ flowchart TD
         page[scripts/page.sh]
     end
 
-    subgraph library ["scripts/SHERVER_UTILS.sh"]
-        init_environment
-        read_request
-        bail_request["_bail_request (exit)"]
-        read_with_timeout[_read_with_timeout]
-        parse_url
-        check_encoding[_check_encoding]
-        url_decode[_url_decode]
-        resolve_path[_resolve_path]
-        get_mimetype[_get_mimetype]
-        html_escape
-        send_header[_send_header]
-        send_response["send_response (exit)"]
-        send_file["send_file (exit)"]
-        send_error["send_error (exit)"]
-        send_redirect["send_redirect (exit)"]
-        run_script
+    subgraph library ["lib/ (sourced by lib/SHERVER.sh)"]
+        subgraph request ["request.sh"]
+            init_environment
+            read_request
+            bail_request["_bail_request (exit)"]
+            read_with_timeout[_read_with_timeout]
+            parse_url
+            check_encoding[_check_encoding]
+            url_decode[_url_decode]
+        end
+        subgraph response ["response.sh"]
+            html_escape
+            send_header[_send_header]
+            send_response["send_response (exit)"]
+            send_error["send_error (exit)"]
+            send_redirect["send_redirect (exit)"]
+        end
+        subgraph static ["static.sh"]
+            resolve_path[_resolve_path]
+            get_mimetype[_get_mimetype]
+            send_file["send_file (exit)"]
+        end
+        subgraph endpoint ["endpoint.sh"]
+            run_script
+        end
     end
 
     dispatcher --> init_environment

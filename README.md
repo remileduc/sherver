@@ -221,7 +221,7 @@ And also a lot of useful functions like:
 - `send_error`
 - `send_redirect`
 
-Check the whole documentation about the `SHERVER_UTILS.sh` library in [docs/functions.md](./docs/functions.md) and
+Check the whole documentation about the library in [docs/functions.md](./docs/functions.md) and
 [docs/global-variables.md](./docs/global-variables.md).
 
 Everything written on the standard output will be sent to the client. Here is a very simple script that returns

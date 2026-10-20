@@ -1,7 +1,7 @@
 Global variables
 ================
 
-The variables `scripts/SHERVER_UTILS.sh` exports, documented by hand:
+The variables the library (`lib/`) exports, documented by hand:
 [tomdoc.sh](https://github.com/mlafeldt/tomdoc.sh) only extracts the functions, which live in
 [functions.md](./functions.md).
 

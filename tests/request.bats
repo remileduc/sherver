@@ -46,12 +46,6 @@ function filler()
 	[ "$(status_code)" = '404' ]
 }
 
-@test "the library itself is not a reachable endpoint" {
-	# it is not executable, so run_script refuses it rather than running it
-	request '' 'GET /SHERVER_UTILS.sh HTTP/1.1' 'Host: localhost'
-	[ "$(status_code)" = '404' ]
-}
-
 @test "the query string reaches the script" {
 	request '' 'GET /index.sh?test=youpi&answer=42 HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]

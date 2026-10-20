@@ -49,7 +49,7 @@ function teardown()
 
 @test "a relative escape out of file/ is refused" {
 	refuses '/file/../dispatcher.sh'
-	refuses '/file/../scripts/SHERVER_UTILS.sh'
+	refuses '/file/../lib/SHERVER.sh'
 	refuses '/file/../../../../etc/passwd'
 	refuses '/file/pages/../../../etc/passwd'
 }
@@ -58,6 +58,13 @@ function teardown()
 	refuses '/../dispatcher.sh'
 	refuses '/../../etc/passwd'
 	refuses '/utils/../../dispatcher.sh'
+}
+
+@test "the library is out of reach from both trees" {
+	# the engine lives in `lib/` so that no exec bit decides whether it is served
+	refuses '/../lib/SHERVER.sh'
+	refuses '/../lib/request.sh'
+	refuses '/file/../lib/request.sh'
 }
 
 @test "an absolute path is refused" {
