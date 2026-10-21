@@ -1,33 +1,3 @@
-`init_environment()`
---------------------
-
-Public: Initialize the environment.
-
-This function should always be ran at the top of any scripts. Once this function has run, all the following variables will be available:
-
-* `SHERVER_ROOT`
-* `REQUEST_METHOD`
-* `REQUEST_URL`
-* `REQUEST_HTTP_VERSION`
-* `REQUEST_HEADERS`
-* `REQUEST_BODY`
-* `REQUEST_BODY_PARAMETERS`
-* `URL_BASE`
-* `URL_PARAMETERS`
-* `RESPONSE_HEADERS`
-* `HTTP_RESPONSE`
-* `MAX_BODY_SIZE`
-* `MAX_HEADERS_SIZE`
-* `REQUEST_FULL_STRING`
-* `DEBUG_LOG`
-
-To do so, it will read from the standard input the received request, and execute `read_request` to initialize everything.
-
-Then, it will export the full request in the environment variable `REQUEST_FULL_STRING` so it can always be reexecuted.
-
-This mechanism also allows non bash script to have access to the request through the environment.
-
-
 `log()`
 -------
 
@@ -62,6 +32,36 @@ Examples
      log_debug "> Content-Type: text/html"
 
 
+`init_environment()`
+--------------------
+
+Public: Initialize the environment.
+
+This function should always be ran at the top of any scripts. Once this function has run, all the following variables will be available:
+
+* `SHERVER_ROOT`
+* `REQUEST_METHOD`
+* `REQUEST_URL`
+* `REQUEST_HTTP_VERSION`
+* `REQUEST_HEADERS`
+* `REQUEST_BODY`
+* `REQUEST_BODY_PARAMETERS`
+* `URL_BASE`
+* `URL_PARAMETERS`
+* `RESPONSE_HEADERS`
+* `HTTP_RESPONSE`
+* `MAX_BODY_SIZE`
+* `MAX_HEADERS_SIZE`
+* `REQUEST_FULL_STRING`
+* `DEBUG_LOG`
+
+To do so, it will read from the standard input the received request, and execute `read_request` to initialize everything.
+
+Then, it will export the full request in the environment variable `REQUEST_FULL_STRING` so it can always be reexecuted.
+
+This mechanism also allows non bash script to have access to the request through the environment.
+
+
 `_check_encoding()`
 -------------------
 
@@ -75,8 +75,8 @@ Returns 0 if the string can safely be given to `_url_decode()`, 1 otherwise. A `
 
 Examples
 
-     _check_encoding '/file/my%20file.txt'  # returns 0
-     _check_encoding '/file/100%'           # returns 1
+     _check_encoding '/static/my%20file.txt'  # returns 0
+     _check_encoding '/static/100%'           # returns 1
 
 
 `_url_decode()`
@@ -159,6 +159,156 @@ will result in
          ['answer']='42'
          ['city']='café ville'
      )
+
+
+`_bail_request()`
+-----------------
+
+Internal: Log a request parse failure, dump the request when relevant, and answer an error.
+
+**Note:** this method is used by `_read_request_line()` and `_read_request_headers()` and shouldn't be called manually.
+
+Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse only (a child script re-parse would dump it once per script), the reason is always `log`ged, and `send_error()` ends the process — this function never returns. Only for the bail-outs *before* the end of the header loop: after that point, the first parse has already dumped the full request unconditionally, and this would dump it a second time — which is why `_read_request_body()` calls `send_error()` directly.
+
+* $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
+* $2 - the reason, `log`ged as is
+* $3 - true when parsing from the standard input, false in a child script re-parse
+
+Examples
+
+     _bail_request 400 'BAD REQUEST: malformed request line' true
+
+
+`_read_with_timeout()`
+----------------------
+
+Internal: `read` from the request under the deadline of `read_request()`, or answer 408.
+
+**Note:** this method is used by the `_read_request_*()` functions and shouldn't be called manually.
+
+Behaves like `read`: the arguments are handed to it as they are, behind a `-t` holding the seconds left before `_REQUEST_DEADLINE`. Once the deadline is past — before the call, or during the read — the request is a `408 Request Timeout` and this function never returns. The timeout on the read itself is what bounds a client dripping a single header line: a check between two lines would only run once the line is complete, which is exactly what such a client never lets happen. The check before the read is needed too, as `read -t 0` polls for input instead of failing. Nothing is dumped with the 408: past the headers the request was dumped already, and before them there is little to show. Any other failure of `read` — the end of the input — is returned as is, for the caller to handle.
+
+`IFS=` and `LC_ALL=C` set in front of the call reach the `read` inside, like any temporary assignment in front of a function call.
+
+* $@ - the options and variable names for `read`
+
+Examples
+
+     while IFS= _read_with_timeout -r line; do  # ends at the end of the input
+
+
+`_read_request_line()`
+----------------------
+
+Internal: Read and validate the request line, and parse the URL.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Reads the first line of the input stream and fills `REQUEST_METHOD`, `REQUEST_URL` and `REQUEST_HTTP_VERSION` — plus `URL_BASE` and `URL_PARAMETERS` through `parse_url()`. `REQUEST_FULL_STRING` starts here, with the raw line.
+
+An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — is stored in `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted. A line that is not complete by the deadline of `read_request()` is a 408.
+
+* $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
+
+Examples
+
+     _read_request_line true
+
+
+`_read_request_headers()`
+-------------------------
+
+Internal: Read the header lines and fill `REQUEST_HEADERS`.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+Reads the input stream up to the empty line that ends the headers, appending each line to `REQUEST_FULL_STRING` on the way.
+
+A header line is refused with a 400 when it is folded (obs-fold), has no colon, still carries a CR once its own terminator is stripped, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2 and RFC 9110 §5.5). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority. Headers still incomplete at the deadline of `read_request()` are a 408.
+
+Once the loop is done, any HTTP/1.1+ request without a `Host` header is refused with a 400 — absolute-form included, RFC 9112 §3.2.2 only voids the header's value — then the `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']`.
+
+* $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
+
+Examples
+
+     _read_request_headers true
+
+
+`separator`
+-----------
+
+RFC 6265 §5.4 forbids repeating `Cookie`, but RFC 9113 §8.2.3 lets an HTTP/2 hop split it — and it recombines on `; `, never on a comma
+
+
+`separator`
+-----------
+
+RFC 9110 §5.2: a repeated field is the comma-separated list it stands for. Overwriting instead would drop what the client sent, and a header we compare as a whole (`If-None-Match`...) degrades to a full answer
+
+
+`read_request()`
+----------------
+
+Internal: Read the client request and set up environment.
+
+**Note:** this method is used by the dispatcher and shouldn't be called manually.
+
+Reads the input stream and fills the following variables (also run `parse_url()`):
+
+* `REQUEST_METHOD`
+* `REQUEST_HTTP_VERSION`
+* `REQUEST_HEADERS`
+* `REQUEST_BODY`
+* `REQUEST_BODY_PARAMETERS`
+* `REQUEST_URL`
+* `URL_BASE`
+* `URL_PARAMETERS`
+
+The work happens in `_read_request_line()`, `_read_request_headers()` and `_read_request_body()`, which read the same input stream and must run in this order, in the current shell: a subshell or a command substitution would keep the variables — and the error page of a bail-out — to itself.
+
+The whole request has `MAX_REQUEST_TIME` seconds to arrive, body included, from the first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like every other). `SECONDS` has a one second resolution, so the budget is really between `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
+
+*Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
+
+* $1 - true when parsing from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so that a request is not dumped once per script it goes through
+
+
+`_drain_request_input()`
+------------------------
+
+Internal: Discard what may still arrive of a request body that will not be read.
+
+**Note:** this method is used by `_read_request_body()` and shouldn't be called manually.
+
+Answering a request whose body is still in flight and exiting leaves unread bytes in the socket, and closing over them is a TCP reset that can destroy the answer — error page or 200 alike — before the client reads it. This is the lingering close of every real server, bounded both ways so a client can't pin the process: at most 64 kio are discarded, and a stalled stream is waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
+
+Examples
+
+     _drain_request_input
+     send_error 413
+
+
+`_read_request_body()`
+----------------------
+
+Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARAMETERS`.
+
+**Note:** this method is used by `read_request()` and shouldn't be called manually.
+
+A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length` — one announced on any other method is drained, unread, so the answer is not lost to a TCP reset. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too. It shares the deadline of `read_request()` with the head: a body still incomplete when it passes is a 408, one cut short by the client a 400.
+
+A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
+
+A client that announced `Expect: 100-continue` (RFC 9110 §10.1.1) is holding the body back, so the interim `HTTP/1.1 100 Continue` line is written right before the body read. Every refusal above it answers with a final status instead — the alternative the same section allows. No interim line goes to an HTTP/1.0 client (a MUST NOT), whose expectation is ignored. `Expect` is a list, and naming anything but `100-continue` in it is a `417 Expectation Failed`, on any method (a MAY): a client waiting on an expectation we will never meet learns right away instead of timing out. An empty element names no expectation and is dropped, so an emptied value passes.
+
+No `_bail_request` here: every bail-out below sits after the header loop, which has already dumped the full request, so `send_error()` is called directly.
+
+* $1 - true when reading from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script — the interim response is written only once, by the first parse
+
+Examples
+
+     _read_request_body true
 
 
 `html_escape()`
@@ -324,16 +474,16 @@ The result is stored in `_RESOLVED_PATH` instead of being echoed, because this f
 
 Sends a 404 if the path is absolute, doesn't exist, or lands outside the authorized directory. We purposely don't use 403 to avoid leak of the File System
 
-* $1 - authorized directory, relative to `SHERVER_ROOT` (`file` or `scripts`)
+* $1 - authorized directory, relative to `SHERVER_ROOT` (`site/static` or `site/app`)
 * $2 - path to resolve, relative to the current directory (an absolute path is refused)
 
 Examples
 
-     _resolve_path 'file' '../file/pages/page.html'
+     _resolve_path 'site/static' '../static/pages/page.html'
 
 will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
 
-     _RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
+     _RESOLVED_PATH='/home/sherver/sherver/site/static/pages/page.html'
 
 
 `_get_mimetype()`
@@ -345,7 +495,7 @@ Internal: Print the mime type of the given file, deduced from its extension.
 
 The type comes from a static table, the way nginx and Apache do it: for a static file server the extension is the authoritative signal.
 
-An unknown or missing extension gives `application/octet-stream`, so that the browser downloads the file instead of guessing how to render it. Since we own everything under `file/`, that case means the table is missing an entry: it is logged.
+An unknown or missing extension gives `application/octet-stream`, so that the browser downloads the file instead of guessing how to render it. Since we own everything under `site/static/`, that case means the table is missing an entry: it is logged.
 
 `text/*` types carry `; charset=utf-8`. The others don't: `application/json` and the image types have no charset parameter.
 
@@ -353,7 +503,7 @@ An unknown or missing extension gives `application/octet-stream`, so that the br
 
 Examples
 
-     _get_mimetype '/home/sherver/sherver/file/beautiful.png'
+     _get_mimetype '/home/sherver/sherver/site/static/beautiful.png'
 
 will print
 
@@ -367,7 +517,7 @@ Public: Try to send the given file, or fail with 404.
 
 Takes the path to the file to send as a parameter.
 
-It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, or if the file is outside of `file/`, send a 404 error.
+It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, or if the file is outside of `site/static/`, send a 404 error.
 
 Every answer carries two cache validators: an `ETag` built from the size and mtime of the file, and its `Last-Modified` date. A conditional request that matches one of them (`If-None-Match` first, `If-Modified-Since` only when no usable ETag was sent) is answered with a bodyless `304 Not Modified`. An `If-None-Match` of `*` matches too.
 
@@ -383,7 +533,7 @@ The path generally comes from the URL (`URL_BASE`). You just need to remove the 
 
 Examples
 
-     parse_url '/file/beautiful.png?dummy=stuff'
+     parse_url '/static/beautiful.png?dummy=stuff'
      send_file "${URL_BASE:1}"
 
 if the file exist, will send a response that starts with (assuming file size is 4 kio)
@@ -402,13 +552,13 @@ Public: Try to run the given file (script or executable), or fail with 404.
 
 Takes the path to the file to run. The file can be a script in any language, or an executable. But it must have the `x` flag so we can run it.
 
-It will simply run the script if possible. If not, send a 404. If the script is outside of `scripts/`, send a 404. If the script fails, send a 500.
+It will simply run the script if possible. If not, send a 404. If the script is outside of `site/app/`, send a 404. If the script fails, send a 500.
 
 It is the script responsibility to send the response and everything...
 
-*Note* that the file is supposed to be in the subfolder `scripts/`. The file will be run inside this folder (we `cd` before running it).
+*Note* that the file is supposed to be in the subfolder `site/app/`. The file will be run inside this folder (we `cd` before running it).
 
-* $1 - the path to the file to run (relative to subfolder `scripts/`)
+* $1 - the path to the file to run (relative to subfolder `site/app/`)
 
 Examples
 
@@ -416,157 +566,7 @@ Examples
 
 will do the following
 
-     cd scripts
+     cd site/app
      './index.sh' '/index.sh?dummy=stuff'
-
-
-`_bail_request()`
------------------
-
-Internal: Log a request parse failure, dump the request when relevant, and answer an error.
-
-**Note:** this method is used by `_read_request_line()` and `_read_request_headers()` and shouldn't be called manually.
-
-Owns the bail-out invariant of `read_request()`: the request is dumped on the first parse only (a child script re-parse would dump it once per script), the reason is always `log`ged, and `send_error()` ends the process — this function never returns. Only for the bail-outs *before* the end of the header loop: after that point, the first parse has already dumped the full request unconditionally, and this would dump it a second time — which is why `_read_request_body()` calls `send_error()` directly.
-
-* $1 - the HTTP error code, one of the keys of `HTTP_RESPONSE`
-* $2 - the reason, `log`ged as is
-* $3 - true when parsing from the standard input, false in a child script re-parse
-
-Examples
-
-     _bail_request 400 'BAD REQUEST: malformed request line' true
-
-
-`_read_with_timeout()`
-----------------------
-
-Internal: `read` from the request under the deadline of `read_request()`, or answer 408.
-
-**Note:** this method is used by the `_read_request_*()` functions and shouldn't be called manually.
-
-Behaves like `read`: the arguments are handed to it as they are, behind a `-t` holding the seconds left before `_REQUEST_DEADLINE`. Once the deadline is past — before the call, or during the read — the request is a `408 Request Timeout` and this function never returns. The timeout on the read itself is what bounds a client dripping a single header line: a check between two lines would only run once the line is complete, which is exactly what such a client never lets happen. The check before the read is needed too, as `read -t 0` polls for input instead of failing. Nothing is dumped with the 408: past the headers the request was dumped already, and before them there is little to show. Any other failure of `read` — the end of the input — is returned as is, for the caller to handle.
-
-`IFS=` and `LC_ALL=C` set in front of the call reach the `read` inside, like any temporary assignment in front of a function call.
-
-* $@ - the options and variable names for `read`
-
-Examples
-
-     while IFS= _read_with_timeout -r line; do  # ends at the end of the input
-
-
-`_read_request_line()`
-----------------------
-
-Internal: Read and validate the request line, and parse the URL.
-
-**Note:** this method is used by `read_request()` and shouldn't be called manually.
-
-Reads the first line of the input stream and fills `REQUEST_METHOD`, `REQUEST_URL` and `REQUEST_HTTP_VERSION` — plus `URL_BASE` and `URL_PARAMETERS` through `parse_url()`. `REQUEST_FULL_STRING` starts here, with the raw line.
-
-An absolute-form request target (`GET http://host/path`, RFC 9112 §3.2.2) is rewritten to the path it points at, and its authority — validated first — is stored in `_REQUEST_AUTHORITY` for `_read_request_headers()` to apply. Any other target that is not a path is refused with a 400, the asterisk form of `OPTIONS` excepted. A line that is not complete by the deadline of `read_request()` is a 408.
-
-* $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
-
-Examples
-
-     _read_request_line true
-
-
-`_read_request_headers()`
--------------------------
-
-Internal: Read the header lines and fill `REQUEST_HEADERS`.
-
-**Note:** this method is used by `read_request()` and shouldn't be called manually.
-
-Reads the input stream up to the empty line that ends the headers, appending each line to `REQUEST_FULL_STRING` on the way.
-
-A header line is refused with a 400 when it is folded (obs-fold), has no colon, still carries a CR once its own terminator is stripped, or has a name that is not a token — whitespace before the colon included (RFC 9112 §5, §5.1, §5.2 and RFC 9110 §5.5). A repeated header becomes the `v1, v2` list of RFC 9110 §5.2 — except `Cookie`, whose pairs recombine on `; ` (RFC 9113 §8.2.3) — but a repeated `Host`, `Content-Length` or `Content-Type` with two different values is a 400: they frame the request, and none of the three is a list. A repeated `Host` is ignored instead, without being compared, when the request-target already carried an authority. Headers still incomplete at the deadline of `read_request()` are a 408.
-
-Once the loop is done, any HTTP/1.1+ request without a `Host` header is refused with a 400 — absolute-form included, RFC 9112 §3.2.2 only voids the header's value — then the `_REQUEST_AUTHORITY` of an absolute-form target replaces `REQUEST_HEADERS['host']`.
-
-* $1 - true when parsing from the standard input, false when re-parsing, see `read_request()`
-
-Examples
-
-     _read_request_headers true
-
-
-`separator`
------------
-
-RFC 6265 §5.4 forbids repeating `Cookie`, but RFC 9113 §8.2.3 lets an HTTP/2 hop split it — and it recombines on `; `, never on a comma
-
-
-`separator`
------------
-
-RFC 9110 §5.2: a repeated field is the comma-separated list it stands for. Overwriting instead would drop what the client sent, and a header we compare as a whole (`If-None-Match`...) degrades to a full answer
-
-
-`_drain_request_input()`
-------------------------
-
-Internal: Discard what may still arrive of a request body that will not be read.
-
-**Note:** this method is used by `_read_request_body()` and shouldn't be called manually.
-
-Answering a request whose body is still in flight and exiting leaves unread bytes in the socket, and closing over them is a TCP reset that can destroy the answer — error page or 200 alike — before the client reads it. This is the lingering close of every real server, bounded both ways so a client can't pin the process: at most 64 kio are discarded, and a stalled stream is waited on for one 0.2 s timeout. A client blasting past the cap may still see the reset.
-
-Examples
-
-     _drain_request_input
-     send_error 413
-
-
-`_read_request_body()`
-----------------------
-
-Internal: Read the body of a POST and fill `REQUEST_BODY` and `REQUEST_BODY_PARAMETERS`.
-
-**Note:** this method is used by `read_request()` and shouldn't be called manually.
-
-A `Transfer-Encoding` is inspected first, on any method: next to a `Content-Length` it is the request smuggling pair of RFC 9112 §6.3, a `400` on presence alone. A lone `chunked` is the only value even recognized, and it is refused too — not decoded — with the `411` the same section sanctions; any other value gets the `400` it MUSTs for a non-final chunked, since no coding will ever be decoded here there is no `501` worth telling apart. An emptied value is no coding at all (RFC 9110 §5.6.1, the header merge's own rule) and the request goes on bodyless. Past that gate, nothing is read unless the request is a POST carrying a `Content-Length` — one announced on any other method is drained, unread, so the answer is not lost to a TCP reset. The length is checked against `MAX_BODY_SIZE` before it is trusted, and the body lands in `REQUEST_FULL_STRING` too. It shares the deadline of `read_request()` with the head: a body still incomplete when it passes is a 408, one cut short by the client a 400.
-
-A body of type `application/x-www-form-urlencoded` is decoded into `REQUEST_BODY_PARAMETERS`.
-
-A client that announced `Expect: 100-continue` (RFC 9110 §10.1.1) is holding the body back, so the interim `HTTP/1.1 100 Continue` line is written right before the body read. Every refusal above it answers with a final status instead — the alternative the same section allows. No interim line goes to an HTTP/1.0 client (a MUST NOT), whose expectation is ignored. `Expect` is a list, and naming anything but `100-continue` in it is a `417 Expectation Failed`, on any method (a MAY): a client waiting on an expectation we will never meet learns right away instead of timing out. An empty element names no expectation and is dropped, so an emptied value passes.
-
-No `_bail_request` here: every bail-out below sits after the header loop, which has already dumped the full request, so `send_error()` is called directly.
-
-* $1 - true when reading from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script — the interim response is written only once, by the first parse
-
-Examples
-
-     _read_request_body true
-
-
-`read_request()`
-----------------
-
-Internal: Read the client request and set up environment.
-
-**Note:** this method is used by the dispatcher and shouldn't be called manually.
-
-Reads the input stream and fills the following variables (also run `parse_url()`):
-
-* `REQUEST_METHOD`
-* `REQUEST_HTTP_VERSION`
-* `REQUEST_HEADERS`
-* `REQUEST_BODY`
-* `REQUEST_BODY_PARAMETERS`
-* `REQUEST_URL`
-* `URL_BASE`
-* `URL_PARAMETERS`
-
-The work happens in `_read_request_line()`, `_read_request_headers()` and `_read_request_body()`, which read the same input stream and must run in this order, in the current shell: a subshell or a command substitution would keep the variables — and the error page of a bail-out — to itself.
-
-The whole request has `MAX_REQUEST_TIME` seconds to arrive, body included, from the first read: `_REQUEST_DEADLINE` is set here and every read of the three goes through `_read_with_timeout()`, which answers the `408 Request Timeout` itself once it is past (RFC 9110 §15.5.9 — the response carries the `Connection: close` it asks for, like every other). `SECONDS` has a one second resolution, so the budget is really between `MAX_REQUEST_TIME - 1` and `MAX_REQUEST_TIME`.
-
-*Note* that this method is highly inspired by [bashttpd](https://github.com/avleen/bashttpd)
-
-* $1 - true when parsing from the standard input, false when re-parsing `REQUEST_FULL_STRING` in a child script. Only the first parse logs the request, so that a request is not dumped once per script it goes through
 
 

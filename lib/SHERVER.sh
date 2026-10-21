@@ -17,17 +17,17 @@
 
 set -efu
 
-init_environment
-
-# OPTIONS is advertised but not accepted here: the dispatcher answers it before routing,
-# so it never reaches a script. Handle it in the test below if that ever changes
-if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
-	add_header 'Allow' 'GET, HEAD, OPTIONS'
-	send_error 405
-fi
-# `:-` because `set -u` makes a missing key fatal, which would end up as a 500
-if [ -z "${URL_PARAMETERS[page]:-}" ]; then
-	send_error 404
-fi
-
-send_file "../file/pages/${URL_PARAMETERS[page]}"
+# The whole library, in the order the modules need each other at load time. Paths are
+# relative to the repository root, where every process that sources this runs from.
+# shellcheck source=lib/log.sh
+source 'lib/log.sh'
+# shellcheck source=lib/request.sh
+source 'lib/request.sh'
+# shellcheck source=lib/body.sh
+source 'lib/body.sh'
+# shellcheck source=lib/response.sh
+source 'lib/response.sh'
+# shellcheck source=lib/static.sh
+source 'lib/static.sh'
+# shellcheck source=lib/endpoint.sh
+source 'lib/endpoint.sh'

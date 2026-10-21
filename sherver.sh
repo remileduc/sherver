@@ -40,11 +40,11 @@ SYNOPSIS
 
 DESCRIPTION
 	Listens on PORT (8080 by default) and forks one dispatcher.sh per
-	connection, which answers the request from the file/ and scripts/
-	folders of this checkout. Logs go to stderr; the process runs until
+	connection, which answers the request from the site/
+	folder of this checkout. Logs go to stderr; the process runs until
 	it is signalled.
 
-	Sherver is not hardened: anything executable under scripts/ is an
+	Sherver is not hardened: anything executable under site/app/ is an
 	endpoint. Never expose it on Internet.
 
 OPTIONS

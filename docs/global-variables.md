@@ -1,7 +1,7 @@
 Global variables
 ================
 
-The variables `scripts/SHERVER_UTILS.sh` exports, documented by hand:
+The variables the library (`lib/`) exports, documented by hand:
 [tomdoc.sh](https://github.com/mlafeldt/tomdoc.sh) only extracts the functions, which live in
 [functions.md](./functions.md).
 
@@ -16,7 +16,7 @@ Public: The full request string
 
 Public: Absolute path to the root of the website (canonical, no symlink)
 
-The dispatcher runs from the root, so we take the current directory. It is then inherited by the child scripts, which need it because `run_script` moves to `scripts/`.
+The dispatcher runs from the root, so we take the current directory. It is then inherited by the child scripts, which need it because `run_script` moves to `site/app/`.
 
 `REQUEST_METHOD`
 ----------------

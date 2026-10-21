@@ -11,15 +11,16 @@ Processes
 
 ```
 sherver.sh ──exec──> socat ──fork+exec (per connection)──> dispatcher.sh
-                                                               │ source scripts/SHERVER_UTILS.sh
+                                                               │ source lib/SHERVER.sh
                                                                │ init_environment
                                                                ├─ method OPTIONS     ──> send_response 200
-                                                               ├─ /file/*            ──> send_file
+                                                               │ source site/routes.sh
+                                                               ├─ /static/*          ──> send_file
                                                                ├─ / or /index.htm[l] ──> run_script '/index.sh'
                                                                └─ anything else      ──> run_script "$REQUEST_URL"
 ```
 
-`run_script` `cd`s into `scripts/` and executes the resolved endpoint as a **new process**
+`run_script` `cd`s into `site/app/` and executes the resolved endpoint as a **new process**
 (`index.sh`, `page.sh`, ...). A Bash endpoint starts by calling `init_environment` again, which
 re-parses the request from the exported `REQUEST_FULL_STRING` instead of stdin.
 
@@ -33,33 +34,42 @@ Function graph
 Two kinds of edges are left out to keep the graph readable: everything may call `log` and
 `log_debug`, and everything that sets a response header does it through `add_header`. Functions
 marked `exit` are terminal: they write the response and end the process, so nothing after them
-runs — including in their callers.
+runs — including in their callers. `read_request` stands for its three `_read_request_*` helpers
+too, which is why `lib/body.sh` (the body reader and the drain) and `lib/log.sh` draw no box.
 
 ```mermaid
 flowchart TD
     subgraph endpoints ["endpoints (one process each)"]
         dispatcher[dispatcher.sh]
-        index[scripts/index.sh]
-        page[scripts/page.sh]
+        index[site/app/index.sh]
+        page[site/app/page.sh]
     end
 
-    subgraph library ["scripts/SHERVER_UTILS.sh"]
-        init_environment
-        read_request
-        bail_request["_bail_request (exit)"]
-        read_with_timeout[_read_with_timeout]
-        parse_url
-        check_encoding[_check_encoding]
-        url_decode[_url_decode]
-        resolve_path[_resolve_path]
-        get_mimetype[_get_mimetype]
-        html_escape
-        send_header[_send_header]
-        send_response["send_response (exit)"]
-        send_file["send_file (exit)"]
-        send_error["send_error (exit)"]
-        send_redirect["send_redirect (exit)"]
-        run_script
+    subgraph library ["lib/ (sourced by lib/SHERVER.sh)"]
+        subgraph request ["request.sh"]
+            init_environment
+            read_request
+            bail_request["_bail_request (exit)"]
+            read_with_timeout[_read_with_timeout]
+            parse_url
+            check_encoding[_check_encoding]
+            url_decode[_url_decode]
+        end
+        subgraph response ["response.sh"]
+            html_escape
+            send_header[_send_header]
+            send_response["send_response (exit)"]
+            send_error["send_error (exit)"]
+            send_redirect["send_redirect (exit)"]
+        end
+        subgraph static ["static.sh"]
+            resolve_path[_resolve_path]
+            get_mimetype[_get_mimetype]
+            send_file["send_file (exit)"]
+        end
+        subgraph endpoint ["endpoint.sh"]
+            run_script
+        end
     end
 
     dispatcher --> init_environment
@@ -123,8 +133,8 @@ The same edges as a table, with the process boundaries spelled out:
 | `send_error`           | `send_response`                                                                 |
 | `send_redirect`        | `send_response`, `send_error`                                                   |
 | `send_response`        | `_send_header`                                                                  |
-| `scripts/index.sh`     | `init_environment`, `html_escape`, `send_response`                              |
-| `scripts/page.sh`      | `init_environment`, `send_error`, `send_file`                                   |
+| `site/app/index.sh`    | `init_environment`, `html_escape`, `send_response`                              |
+| `site/app/page.sh`     | `init_environment`, `send_error`, `send_file`                                   |
 
 `send_file` answers a 304 through `send_response`, but streams the body itself: `_send_header` then
 `cat` for a 200, or `tail -c | head -c` for a 206. `_send_header` writes the status line, the headers
@@ -149,7 +159,7 @@ failures through `_bail_request`, which owns the dump-and-log convention, and it
 | `run_script`           | 404, 500                                    | endpoint not executable, or it exited non-zero            |
 | `send_file`            | 404, 416                                    | not a readable regular file; unsatisfiable `Range`        |
 | `send_redirect`        | 500                                         | no target, a CR or LF in it, or non-redirect code         |
-| `scripts/page.sh`      | 404, 405                                    | missing `page` parameter; method not GET or HEAD          |
+| `site/app/page.sh`     | 404, 405                                    | missing `page` parameter; method not GET or HEAD          |
 
 `read_request` also writes the interim `HTTP/1.1 100 Continue` itself, raw — never through
 `_send_header`, which would log an access line and consume `RESPONSE_HEADERS`.

@@ -26,7 +26,16 @@ fi
 # every path below is relative to the root, and this script lives in `tests/`
 cd "$(dirname "$0")/.."
 
-declare -r LIBRARY='scripts/SHERVER_UTILS.sh'
+# The library is the loader plus the modules it sources, in that order. The loader is the
+# one place the order is written: `docs/functions.md` is generated in it, and neither a
+# glob (which follows the locale) nor `git ls-files` (bytewise) would give the same one.
+declare -r LOADER='lib/SHERVER.sh'
+if [ ! -f "$LOADER" ]; then
+	printf '%s: %s is missing, run me from a checkout\n' "$0" "$LOADER" >&2
+	exit 2
+fi
+declare -a MODULES
+mapfile -t MODULES < <(grep -oP "^source '\K[^']+" "$LOADER")
 declare -i FAILURES=0
 
 # Every file we wrote, straight from git: it already knows about `tomdoc.sh` and the
@@ -50,12 +59,8 @@ mapfile -t BATS_FILES < <(git ls-files -- '*.bats')
 
 # Every check below walks a list of files, so an empty list would make all of them
 # pass without looking at anything. Fail loudly instead.
-if [ ! -f "$LIBRARY" ]; then
-	printf '%s: %s is missing, run me from a checkout\n' "$0" "$LIBRARY" >&2
-	exit 2
-fi
-if [[ " ${STANDALONE_SCRIPTS[*]} " != *" $LIBRARY "* ]]; then
-	printf '%s: git does not list %s, is this a git checkout?\n' "$0" "$LIBRARY" >&2
+if [[ " ${STANDALONE_SCRIPTS[*]} " != *" $LOADER "* ]]; then
+	printf '%s: git does not list %s, is this a git checkout?\n' "$0" "$LOADER" >&2
 	exit 2
 fi
 
@@ -106,10 +111,17 @@ function report()
 	return 1
 }
 
-# Internal: Static analysis. `-x` follows the `source` in the dispatcher.
+# Internal: Static analysis, on the entry points only: `-x` follows the `source` chain
+# from the dispatcher down to each module, so a module is checked in the context that
+# declares what it uses. Torn out of it, every global it reads is "unused" noise.
 function check_shellcheck()
 {
-	shellcheck --external-sources -- "${SHELL_FILES[@]}"
+	local file
+	local -a entry_points=()
+	for file in "${SHELL_FILES[@]}"; do
+		[[ $file == lib/* || $file == site/routes.sh ]] || entry_points+=("$file")
+	done
+	shellcheck --external-sources -- "${entry_points[@]}"
 }
 
 # Internal: Every script must at least parse.
@@ -188,12 +200,12 @@ function check_exports()
 	local -i status=0
 	local -a names=()
 	mapfile -t names < <(comm -23 \
-		<(grep -oP '^function \K\w+' "$LIBRARY" | sort) \
-		<(grep -oP '^export -f \K\w+' "$LIBRARY" | sort))
+		<(grep -hoP '^function \K\w+' "${MODULES[@]}" | sort) \
+		<(grep -hoP '^export -f \K\w+' "${MODULES[@]}" | sort))
 	report "declared but never exported with 'export -f':" "${names[@]}" || status=1
 	mapfile -t names < <(comm -13 \
-		<(grep -oP '^function \K\w+' "$LIBRARY" | sort) \
-		<(grep -oP '^export -f \K\w+' "$LIBRARY" | sort))
+		<(grep -hoP '^function \K\w+' "${MODULES[@]}" | sort) \
+		<(grep -hoP '^export -f \K\w+' "${MODULES[@]}" | sort))
 	report "exported with 'export -f' but not declared:" "${names[@]}" || status=1
 	return "$status"
 }
@@ -202,25 +214,44 @@ function check_exports()
 # generated from them.
 function check_tomdoc()
 {
-	local -a lines
-	mapfile -t lines < "$LIBRARY"
-	local -a undocumented=()
-	local name line documented
+	local -a lines undocumented=()
+	local file name line documented
 	local -i i
-	while IFS=: read -r line name; do
-		# walk back over the comment block sitting right above the declaration.
-		# `lines` is 0 indexed, so the line above line N sits at N-2
-		documented=false
-		for (( i=line-2; i >= 0; i-- )); do
-			[[ ${lines[i]} == '#'* ]] || break
-			if [[ ${lines[i]} == *'Public:'* || ${lines[i]} == *'Internal:'* ]]; then
-				documented=true
-				break
-			fi
-		done
-		[ "$documented" = true ] || undocumented+=("$name (line $line)")
-	done < <(grep -noP '^function \K\w+' "$LIBRARY")
+	for file in "${MODULES[@]}"; do
+		mapfile -t lines < "$file"
+		while IFS=: read -r line name; do
+			# walk back over the comment block sitting right above the declaration.
+			# `lines` is 0 indexed, so the line above line N sits at N-2
+			documented=false
+			for (( i=line-2; i >= 0; i-- )); do
+				[[ ${lines[i]} == '#'* ]] || break
+				if [[ ${lines[i]} == *'Public:'* || ${lines[i]} == *'Internal:'* ]]; then
+					documented=true
+					break
+				fi
+			done
+			[ "$documented" = true ] || undocumented+=("$name ($file line $line)")
+		done < <(grep -noP '^function \K\w+' "$file")
+	done
 	report "missing a 'Public:'/'Internal:' TomDoc block:" "${undocumented[@]}"
+}
+
+# Internal: Every module under `lib/` is sourced by the loader, and every file the loader
+# sources is in git: a module left out of the loader is dead code no other check reads,
+# and one missing from git is a server that cannot start from a clone.
+function check_modules()
+{
+	local -i status=0
+	local -a files=()
+	mapfile -t files < <(comm -23 \
+		<(git ls-files -- 'lib/*.sh' | sort) \
+		<(printf '%s\n' "$LOADER" "${MODULES[@]}" | sort))
+	report "under lib/ but not sourced by $LOADER:" "${files[@]}" || status=1
+	mapfile -t files < <(comm -13 \
+		<(git ls-files -- 'lib/*.sh' | sort) \
+		<(printf '%s\n' "$LOADER" "${MODULES[@]}" | sort))
+	report "sourced by $LOADER but not in git:" "${files[@]}" || status=1
+	return "$status"
 }
 
 # Internal: `send_error` looks the code up in `HTTP_RESPONSE` under `set -u`, so an
@@ -232,7 +263,9 @@ function check_error_codes()
 	local code
 	while read -r code; do
 		known["$code"]=1
-	done < <(sed -n '/HTTP_RESPONSE=(/,/^\t)/p' "$LIBRARY" | grep -oP '\[\K[0-9]+(?=\])')
+	# the one module named explicitly: the range ends on the first `^\t)`, and run over
+	# every module it would silently stop short on any other function ending the same way
+	done < <(sed -n '/HTTP_RESPONSE=(/,/^\t)/p' 'lib/request.sh' | grep -oP '\[\K[0-9]+(?=\])')
 	local -a unknown=()
 	while read -r code; do
 		[ -v "known[$code]" ] || unknown+=("$code")
@@ -240,8 +273,9 @@ function check_error_codes()
 	report "sent by send_error or _bail_request but absent from HTTP_RESPONSE:" "${unknown[@]}"
 }
 
-# Internal: Anything executable under `scripts/` is a reachable HTTP endpoint, so the
-# library must not be, and the endpoints must be.
+# Internal: Anything executable under `site/app/` is a reachable HTTP endpoint, so every
+# script there must be. The library and the routes are sourced, never run, so nothing
+# under `lib/` may be, nor `site/routes.sh`.
 function check_executable_bits()
 {
 	local file
@@ -251,10 +285,10 @@ function check_executable_bits()
 	done
 	for file in "${STANDALONE_SCRIPTS[@]}"; do
 		case "$file" in
-			"$LIBRARY")
-				[ ! -x "$file" ] || wrong+=("$file is executable, so it is served as an endpoint")
+			lib/*|site/routes.sh)
+				[ ! -x "$file" ] || wrong+=("$file is executable, but it is sourced, never run")
 				;;
-			scripts/*)
+			site/app/*)
 				[ -x "$file" ] || wrong+=("$file is not executable, so it answers 404")
 				;;
 		esac
@@ -267,17 +301,17 @@ function check_executable_bits()
 function check_generated_docs()
 {
 	if [ ! -x './tomdoc.sh' ]; then
-		echo 'tomdoc.sh is not in the repository root, see scripts/README.md'
+		echo 'tomdoc.sh is not in the repository root, see site/app/README.md'
 		return 77
 	fi
 	local generated
 	generated=$(mktemp)
-	./tomdoc.sh --markdown "$LIBRARY" > "$generated"
+	./tomdoc.sh --markdown "${MODULES[@]}" > "$generated"
 	local -i status=0
 	diff 'docs/functions.md' "$generated" || status=$?
 	rm -f "$generated"
 	if [ "$status" -ne 0 ]; then
-		echo "run './tomdoc.sh --markdown scripts/SHERVER_UTILS.sh > docs/functions.md'"
+		echo "run './tomdoc.sh --markdown ${MODULES[*]} > docs/functions.md'"
 	fi
 	return "$status"
 }
@@ -290,6 +324,7 @@ check 'syntax (bats)'                 check_bats_syntax
 check 'set -efu'                      check_shell_options
 check 'MIT header'                    check_license
 check 'whitespace'                    check_whitespace
+check 'library modules'               check_modules
 check 'library exports'               check_exports
 check 'library TomDoc comments'       check_tomdoc
 check 'HTTP error codes'              check_error_codes

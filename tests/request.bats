@@ -46,12 +46,6 @@ function filler()
 	[ "$(status_code)" = '404' ]
 }
 
-@test "the library itself is not a reachable endpoint" {
-	# it is not executable, so run_script refuses it rather than running it
-	request '' 'GET /SHERVER_UTILS.sh HTTP/1.1' 'Host: localhost'
-	[ "$(status_code)" = '404' ]
-}
-
 @test "the query string reaches the script" {
 	request '' 'GET /index.sh?test=youpi&answer=42 HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
@@ -151,7 +145,7 @@ a b' ]
 @test "OPTIONS answers before any routing" {
 	# asterisk form (RFC 9112 §3.2.4), and a path that would otherwise be a 404
 	local target
-	for target in '*' '/nope.sh' '/file/nope.txt'; do
+	for target in '*' '/nope.sh' '/static/nope.txt'; do
 		request '' "OPTIONS $target HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '200' ]
 		[ "$(header Allow)" = 'GET, HEAD, POST, OPTIONS' ]
@@ -316,7 +310,7 @@ authority.example' ]
 
 @test "a URL that is not decodable is a 400" {
 	local url
-	for url in '/index.sh?a=%zz' '/%2' '/file/100%' '/index.sh?a=%00'; do
+	for url in '/index.sh?a=%zz' '/%2' '/static/100%' '/index.sh?a=%00'; do
 		request '' "GET $url HTTP/1.1" 'Host: localhost'
 		[ "$(status_code)" = '400' ]
 	done
@@ -672,7 +666,7 @@ X-Foo:' \
 @test "an error page is never stored" {
 	# several codes depend on a request header nothing nominates in a `Vary` (Range, the
 	# header-size limits, the version), so a stored error page could answer a good request
-	request '' 'GET /file/nope.txt HTTP/1.1' 'Host: localhost'
+	request '' 'GET /static/nope.txt HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
 	[ "$(header Cache-Control)" = 'no-store' ]
 }

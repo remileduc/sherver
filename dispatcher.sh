@@ -25,7 +25,7 @@ fi
 
 export LC_ALL=C.UTF-8
 
-source 'scripts/SHERVER_UTILS.sh'
+source 'lib/SHERVER.sh'
 
 init_environment
 
@@ -36,15 +36,9 @@ if [ "$REQUEST_METHOD" = 'OPTIONS' ]; then
 	# 200 with an empty body and not 204: a 204 MUST NOT carry the `Content-Length`
 	# that `send_response` adds to everything but a 304
 	send_response 200
-# serve file
-elif [[ $URL_BASE =~ ^/file/.* ]]; then
-	send_file "${URL_BASE:1}"
-# run script
-# special case for root
-elif [ "$URL_BASE" = '/' ] || [[ $URL_BASE =~ ^/index\.html?$ ]]; then
-	run_script '/index.sh'
-else
-	run_script "$REQUEST_URL"
 fi
+
+# shellcheck source=site/routes.sh
+source 'site/routes.sh'
 
 exit 0
