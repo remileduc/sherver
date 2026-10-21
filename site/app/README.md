@@ -2,7 +2,9 @@ The `site/app/` folder
 ======================
 
 Anything executable in this folder is a reachable HTTP endpoint: `run_script` resolves the URL
-here, `cd`s in, and executes the file with the full URL in `$1`. The library the endpoints use
+here, `cd`s in, and runs the file with the full URL in `$1` — a `*.sh` is sourced in a subshell
+of the dispatcher, with the request already parsed and the library in scope; anything else is
+executed as a new process. The library the endpoints use
 lives in `lib/`, outside of this folder, so that no exec bit decides whether it is served;
 `tests/lint.sh` checks that every script here is executable and that nothing under `lib/` is.
 The page templates used by the endpoints live in `templates/`.

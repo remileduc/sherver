@@ -26,7 +26,13 @@ if [[ $URL_BASE =~ ^/static/.* ]]; then
 # run script
 # special case for root
 elif [ "$URL_BASE" = '/' ] || [[ $URL_BASE =~ ^/index\.html?$ ]]; then
-	run_script '/index.sh'
+	# the query string goes along: the endpoint sees the URL `run_script` was handed. Cut
+	# at the raw `?`, not at the length of `URL_BASE`: that one is percent-decoded
+	declare -g query_string=''
+	if [[ $REQUEST_URL == *\?* ]]; then
+		query_string="?${REQUEST_URL#*\?}"
+	fi
+	run_script "/index.sh$query_string"
 else
 	run_script "$REQUEST_URL"
 fi

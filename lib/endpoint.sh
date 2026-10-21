@@ -27,6 +27,19 @@ set -efu
 # It will simply run the script if possible. If not, send a 404. If the script is outside
 # of `site/app/`, send a 404. If the script fails, send a 500.
 #
+# How it is run depends on the name the URL ends with:
+#
+# * `*.sh` is a bash endpoint, `source`d in a subshell of this process: it sees the parsed
+#   request (`REQUEST_HEADERS`, `URL_PARAMETERS`...) as they are, with no re-parse and no
+#   `init_environment` call needed. Its `exit`, and the `send_*` functions, end the
+#   subshell only; a failing command does too, and that is the 500: `set -e` is on in the
+#   subshell whether or not the endpoint sets it, so the library fails the way it expects;
+# * anything else is executed as a new process, with the URL in `$1` and the request in
+#   the environment variable `REQUEST_FULL_STRING`.
+#
+# The name is the one in the URL, not the file it resolves to: a symlink `foo -> foo.sh`
+# is executed, as its URL says.
+#
 # It is the script responsibility to send the response and everything...
 #
 # *Note* that the file is supposed to be in the subfolder `site/app/`. The file will be
@@ -41,19 +54,43 @@ set -efu
 # will do the following
 #
 #    cd site/app
-#    './index.sh' '/index.sh?dummy=stuff'
+#    ( source './index.sh' '/index.sh?dummy=stuff' )
 function run_script()
 {
+	# here and not in the subshell: `_resolve_path` resolves against the cwd
 	cd 'site/app'
-	local -r url="${1:-$REQUEST_URL}"
-	parse_url "$url"
+	# a sourced endpoint runs in this scope: these names must not be ones it would pick
+	local -r _run_script_url="${1:-$REQUEST_URL}"
+	parse_url "$_run_script_url"
 	_resolve_path 'site/app' "${URL_BASE:1}"
-	local -r script="$_RESOLVED_PATH"
-	# existence is already guaranteed by `_resolve_path`
-	if [ ! -f "$script" ] || [ ! -x "$script" ]; then
+	local -r _run_script_file="$_RESOLVED_PATH"
+	# existence is already guaranteed by `_resolve_path`; the exec bit is what publishes
+	# an endpoint, sourced or not
+	if [ ! -f "$_run_script_file" ] || [ ! -x "$_run_script_file" ]; then
 		send_error 404
 	fi
 
-	"$script" "$url" || send_error 500
+	case "$URL_BASE" in
+		*.sh)
+			# `source` reads the file where `exec` would not have to
+			if [ ! -r "$_run_script_file" ]; then
+				log "NOT FOUND: not readable - $_run_script_file"
+				send_error 404
+			fi
+			# not `( ... ) || send_error 500`: bash ignores `set -e` inside anything on
+			# the left of a `||`, and the endpoint would run on past its first failure.
+			# The subshell forks with `-e` off, hence the `set -e` inside
+			set +e
+			( set -e; source "$_run_script_file" "$_run_script_url" )
+			local -ir _run_script_status=$?
+			set -e
+			if [ "$_run_script_status" -ne 0 ]; then
+				send_error 500
+			fi
+			;;
+		*)
+			"$_run_script_file" "$_run_script_url" || send_error 500
+			;;
+	esac
 }
 export -f run_script

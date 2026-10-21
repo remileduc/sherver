@@ -25,6 +25,30 @@ function filler()
 	printf '%*s' "$1" '' | tr ' ' 'a'
 }
 
+# Internal: Write an executable endpoint under `site/app/`, from stdin.
+#
+# Anything executable there is a live endpoint, so `teardown` removes every fixture,
+# whether or not the test that wrote it failed halfway.
+#
+# $1 - the file name, under `site/app/`
+# $2 - the mode to set, default `755`
+function endpoint_fixture()
+{
+	cat > "$REPO_ROOT/site/app/$1"
+	chmod "${2:-755}" "$REPO_ROOT/site/app/$1"
+	_FIXTURES+=("$1")
+}
+
+declare -a _FIXTURES=()
+
+function teardown()
+{
+	local fixture
+	for fixture in "${_FIXTURES[@]}"; do
+		rm -f -- "$REPO_ROOT/site/app/$fixture"
+	done
+}
+
 # ------------------------------------------------------------------- routing
 
 @test "GET / serves the index" {
@@ -41,6 +65,99 @@ function filler()
 	[ "$(status_code)" = '200' ]
 }
 
+@test "a .sh endpoint is sourced: it sees the parsed request without init_environment" {
+	endpoint_fixture 'test-sourced.sh' <<'EOF'
+set -efu
+add_header 'Content-Type' 'text/plain'
+send_response 200 "$1 ${REQUEST_HEADERS['x-probe']} ${URL_PARAMETERS['a']} $$ $BASHPID"
+EOF
+	request '' 'GET /test-sourced.sh?a=1 HTTP/1.1' 'Host: localhost' 'X-Probe: seen'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == '/test-sourced.sh?a=1 seen 1 '* ]]
+	# `$$` keeps the parent's pid in a subshell, `$BASHPID` does not: in an executed
+	# child the two would be equal
+	read -r _ _ _ parent_pid own_pid < <(body)
+	[ "$parent_pid" != "$own_pid" ]
+}
+
+@test "a .sh endpoint failing under set -e is a 500, nothing after the failure runs" {
+	endpoint_fixture 'test-failing.sh' <<'EOF'
+set -efu
+false
+add_header 'Content-Type' 'text/plain'
+send_response 200 'not reached'
+EOF
+	request '' 'GET /test-failing.sh HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '500' ]
+	[ "$(grep -ac '^HTTP/1.1' -- "$RESPONSE")" = '1' ]
+	! grep -aq 'not reached' -- "$RESPONSE"
+}
+
+@test "a .sh endpoint without set -e still gets the 500 of a failing command" {
+	# `set -e` is on in the subshell regardless: the library relies on it
+	endpoint_fixture 'test-no-errexit.sh' <<'EOF'
+false
+add_header 'Content-Type' 'text/plain'
+send_response 200 'not reached'
+EOF
+	request '' 'GET /test-no-errexit.sh HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '500' ]
+	! grep -aq 'not reached' -- "$RESPONSE"
+}
+
+@test "an executable .sh endpoint that cannot be read is a 404, not a bash error" {
+	endpoint_fixture 'test-unreadable.sh' '111' <<'EOF'
+set -efu
+send_response 200 'not reached'
+EOF
+	if [ -r "$REPO_ROOT/site/app/test-unreadable.sh" ]; then
+		skip 'running as root, every file is readable'
+	fi
+	request '' 'GET /test-unreadable.sh HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '404' ]
+	[[ "$(log_output)" == *'not readable'* ]]
+}
+
+@test "run_script's own variables are not readonly inside a sourced endpoint" {
+	# a sourced endpoint runs in `run_script`'s scope: `url` and `script` are its to use
+	endpoint_fixture 'test-names.sh' <<'EOF'
+set -efu
+url='mine'
+script='mine too'
+status=0
+add_header 'Content-Type' 'text/plain'
+send_response 200 "$url $script $status"
+EOF
+	request '' 'GET /test-names.sh HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[ "$(body)" = 'mine mine too 0' ]
+}
+
+@test "a .sh endpoint that still calls init_environment is served once" {
+	endpoint_fixture 'test-init.sh' <<'EOF'
+set -efu
+init_environment
+add_header 'Content-Type' 'text/plain'
+send_response 200 "$REQUEST_BODY"
+EOF
+	request 'hello' 'POST /test-init.sh HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
+		'Expect: 100-continue'
+	[ "$(status_code)" = '200' ]
+	[ "$(body)" = 'hello' ]
+	[ "$(grep -ac '^HTTP/1.1 100 Continue' -- "$RESPONSE")" = '1' ]
+}
+
+@test "an endpoint not named .sh is executed, with the URL in \$1" {
+	endpoint_fixture 'test-exec' <<'EOF'
+#!/bin/sh
+printf 'HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n%s %s' \
+	"$1" "$(printf '%s' "$REQUEST_FULL_STRING" | head -n 1 | tr -d '\r')"
+EOF
+	request '' 'GET /test-exec?b=2 HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[ "$(body)" = '/test-exec?b=2 GET /test-exec?b=2 HTTP/1.1' ]
+}
+
 @test "GET of an unknown script is a 404" {
 	request '' 'GET /nope.sh HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '404' ]
@@ -51,6 +168,17 @@ function filler()
 	[ "$(status_code)" = '200' ]
 	[[ "$(body)" == *'test: youpi'* ]]
 	[[ "$(body)" == *'answer: 42'* ]]
+}
+
+@test "the root route forwards the query string of a percent-encoded index path" {
+	# `/index%2Ehtml` decodes to a shorter `URL_BASE` than the raw target: the cut must
+	# be at the `?`, not at that length
+	request '' 'GET /index%2Ehtml?test=youpi HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == *'test: youpi'* ]]
+	request '' 'GET /index%2Ehtml HTTP/1.1' 'Host: localhost'
+	[ "$(status_code)" = '200' ]
+	[[ "$(body)" == *'<h1>Sherver example</h1>'* ]]
 }
 
 # -------------------------------------------------------------------- methods
@@ -379,8 +507,7 @@ authority.example' ]
 # --------------------------------------------------------- Expect: 100-continue
 
 @test "Expect: 100-continue gets the interim line, then the final response" {
-	# POST / runs index.sh, whose re-parse of REQUEST_FULL_STRING must not repeat the
-	# interim line — hence the count
+	# the count: the interim line is written once, by the dispatcher's parse only
 	request 'hello' 'POST / HTTP/1.1' 'Host: localhost' 'Content-Length: 5' \
 		'Expect: 100-continue'
 	[ "$(head -n 1 -- "$RESPONSE" | tr -d '\r')" = 'HTTP/1.1 100 Continue' ]
@@ -679,10 +806,18 @@ X-Foo:' \
 }
 
 @test "the Host header survives the child script re-parse" {
-	# index.sh re-parses REQUEST_FULL_STRING in its own process: the Host line must
-	# round-trip through it, or every scripted endpoint would 400 on the second parse
-	request '' 'GET /index.sh HTTP/1.1' 'Host: localhost'
+	# a bash endpoint not named .sh re-parses REQUEST_FULL_STRING in its own process:
+	# the Host line must round-trip through it, or it would 400 on the second parse
+	endpoint_fixture 'test-reparse' <<'EOF'
+#!/bin/bash
+set -efu
+init_environment
+add_header 'Content-Type' 'text/plain'
+send_response 200 "${REQUEST_HEADERS['host']}"
+EOF
+	request '' 'GET /test-reparse HTTP/1.1' 'Host: localhost'
 	[ "$(status_code)" = '200' ]
+	[ "$(body)" = 'localhost' ]
 }
 
 @test "an error page announces its own length" {

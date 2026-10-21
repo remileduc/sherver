@@ -198,8 +198,12 @@ The executable is ran from the `site/app` folder, so relative paths inside a scr
 
 **Bash scripts**
 
-Sherver is mainly made to work with bash scripts. If you create a Bash script, the first thing you should do is to
-run the function `init_environment`. Then you will have access to all the following variables:
+Sherver is mainly made to work with bash scripts. An endpoint whose name ends in `.sh` is not executed but
+*sourced*, in a subshell of the dispatcher: the request is already parsed when its first line runs, so there
+is nothing to initialize.
+A bash script named without the `.sh` extension is executed like any other
+binary (see below) and has to call `init_environment` first. In a `.sh` endpoint you have access to all
+the following variables:
 - `SHERVER_ROOT`
 - `REQUEST_METHOD`
 - `REQUEST_URL`
@@ -231,7 +235,7 @@ the requests in a text format:
 ```bash
 #!/bin/bash
 
-init_environment
+set -efu
 # `OPTIONS` is advertised but not tested: the dispatcher answers it before routing
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
 	add_header 'Allow' 'GET, HEAD, OPTIONS'
@@ -244,8 +248,9 @@ send_response 200 "$REQUEST_FULL_STRING"
 
 **Any other scripts or binaries**
 
-If you don't use Bash, you will only have access to the environment variable `REQUEST_FULL_STRING` that
-contains the full request as a string. The requested URL (`REQUEST_URL`) will be passed as first argument.
+Anything not named `*.sh` is executed as a new process. If you don't use Bash, you will only have access to
+the environment variable `REQUEST_FULL_STRING` that contains the full request as a string. The requested
+URL (`REQUEST_URL`) will be passed as first argument.
 
 Everything written on the standard output will be sent to the client. Though, you should write the
 headers of the response yourself. That includes handling `HEAD` requests: the method is the first word
@@ -272,7 +277,7 @@ And you would use it with the following script:
 ```bash
 #!/bin/bash
 
-init_environment
+set -efu
 # `OPTIONS` is advertised but not tested: the dispatcher answers it before routing
 if [ "$REQUEST_METHOD" != 'GET' ] && [ "$REQUEST_METHOD" != 'HEAD' ]; then
 	add_header 'Allow' 'GET, HEAD, OPTIONS'

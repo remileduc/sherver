@@ -39,12 +39,12 @@ function serves()
 }
 
 # The symlinks the tests below create are removed here rather than in the test bodies,
-# because bats stops a body at its first failing line and would leak them — `site/app/-e`
+# because bats stops a body at its first failing line and would leak them — `site/app/-e.sh`
 # would then be a live endpoint on the real server.
 function teardown()
 {
 	rm -f "$REPO_ROOT/site/static/test-escape.txt" "$REPO_ROOT/site/static/test-inside.webp" \
-		"$REPO_ROOT/site/app/-e"
+		"$REPO_ROOT/site/app/-e.sh"
 }
 
 # Both trees sit two levels down (`site/static/`, `site/app/`), so the escapes that aim at a
@@ -128,9 +128,10 @@ function teardown()
 }
 
 @test "a URL that looks like an option is still a path" {
-	# `realpath` is called bare, so `/-e` must reach it as `./-e` and not as a flag
-	ln -sfn 'index.sh' "$REPO_ROOT/site/app/-e"
-	serves '/-e'
+	# `realpath` is called bare, so `/-e.sh` must reach it as `./-e.sh` and not as a flag.
+	# The `.sh` name: a symlink is run by the name the URL says, and `index.sh` is sourced
+	ln -sfn 'index.sh' "$REPO_ROOT/site/app/-e.sh"
+	serves '/-e.sh'
 }
 
 @test "a template is not served as a script" {
