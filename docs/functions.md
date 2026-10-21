@@ -37,7 +37,7 @@ Examples
 
 Public: Initialize the environment.
 
-This function should always be ran at the top of any scripts. Once this function has run, all the following variables will be available:
+The dispatcher runs it once the library is sourced, and a `.sh` endpoint, being sourced into that same process by `run_script`, finds everything already set: it does not need to call it. Calling it anyway is a no-op, as a second parse of the same request would only trip over the read-only declarations below. Once this function has run, all the following variables will be available:
 
 * `SHERVER_ROOT`
 * `REQUEST_METHOD`
@@ -554,6 +554,18 @@ Takes the path to the file to run. The file can be a script in any language, or 
 
 It will simply run the script if possible. If not, send a 404. If the script is outside of `site/app/`, send a 404. If the script fails, send a 500.
 
+How it is run depends on the name the URL ends with:
+
+* `*.sh` is a bash endpoint, `source`d in a subshell of this process: it sees the parsed
+    request (`REQUEST_HEADERS`, `URL_PARAMETERS`...) as they are, with no re-parse and no
+    `init_environment` call needed. Its `exit`, and the `send_*` functions, end the
+    subshell only; a failing command does too, and that is the 500: `set -e` is on in the
+    subshell whether or not the endpoint sets it, so the library fails the way it expects;
+* anything else is executed as a new process, with the URL in `$1` and the request in
+    the environment variable `REQUEST_FULL_STRING`.
+
+The name is the one in the URL, not the file it resolves to: a symlink `foo -> foo.sh` is executed, as its URL says.
+
 It is the script responsibility to send the response and everything...
 
 *Note* that the file is supposed to be in the subfolder `site/app/`. The file will be run inside this folder (we `cd` before running it).
@@ -567,6 +579,6 @@ Examples
 will do the following
 
      cd site/app
-     './index.sh' '/index.sh?dummy=stuff'
+     ( source './index.sh' '/index.sh?dummy=stuff' )
 
 

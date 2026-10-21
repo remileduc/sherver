@@ -20,9 +20,13 @@ sherver.sh ──exec──> socat ──fork+exec (per connection)──> dispa
                                                                └─ anything else      ──> run_script "$REQUEST_URL"
 ```
 
-`run_script` `cd`s into `site/app/` and executes the resolved endpoint as a **new process**
-(`index.sh`, `page.sh`, ...). A Bash endpoint starts by calling `init_environment` again, which
-re-parses the request from the exported `REQUEST_FULL_STRING` instead of stdin.
+`run_script` `cd`s into `site/app/` and runs the resolved endpoint by the name the URL ends with:
+a `.sh` (`index.sh`, `page.sh`, ...) is **sourced in a subshell** of the dispatcher, so it sees the
+parsed request as it is — its `exit` and a failing command end the subshell only, which is where
+the 500 comes from; anything else is executed as a **new process** with `REQUEST_FULL_STRING`
+in its environment. A `.sh` endpoint that still calls `init_environment` gets a no-op, the
+`_SHERVER_PARSED` guard; a bash endpoint without the extension re-parses that string instead of
+stdin.
 
 Two clocks run on a connection: `socat -T 10` drops one that goes *silent*, in either direction,
 and the dispatcher gives the request itself `MAX_REQUEST_TIME` seconds to arrive — every read of
@@ -39,7 +43,7 @@ too, which is why `lib/body.sh` (the body reader and the drain) and `lib/log.sh`
 
 ```mermaid
 flowchart TD
-    subgraph endpoints ["endpoints (one process each)"]
+    subgraph endpoints ["dispatcher.sh and the .sh endpoints it sources (one process)"]
         dispatcher[dispatcher.sh]
         index[site/app/index.sh]
         page[site/app/page.sh]
@@ -93,13 +97,11 @@ flowchart TD
     run_script --> parse_url
     run_script --> resolve_path
     run_script --> send_error
-    run_script -. exec .-> index
-    run_script -. exec .-> page
+    run_script -. source, subshell .-> index
+    run_script -. source, subshell .-> page
 
-    index --> init_environment
     index --> html_escape
     index --> send_response
-    page --> init_environment
     page --> send_error
     page --> send_file
 
@@ -127,14 +129,15 @@ The same edges as a table, with the process boundaries spelled out:
 | `_read_with_timeout`   | `send_error`                                                                    |
 | `_bail_request`        | `send_error`                                                                    |
 | `parse_url`            | `_check_encoding`, `_url_decode`, `send_error`                                  |
-| `run_script`           | `parse_url`, `_resolve_path`, `send_error`, the endpoint (exec)                 |
+| `run_script`           | `parse_url`, `_resolve_path`, `send_error`, the endpoint (`.sh`: sourced in a   |
+|                        | subshell; anything else: exec)                                                  |
 | `send_file`            | `_resolve_path`, `_get_mimetype`, `send_response`, `_send_header`, `send_error` |
 | `_resolve_path`        | `send_error`                                                                    |
 | `send_error`           | `send_response`                                                                 |
 | `send_redirect`        | `send_response`, `send_error`                                                   |
 | `send_response`        | `_send_header`                                                                  |
-| `site/app/index.sh`    | `init_environment`, `html_escape`, `send_response`                              |
-| `site/app/page.sh`     | `init_environment`, `send_error`, `send_file`                                   |
+| `site/app/index.sh`    | `html_escape`, `send_response`                                                  |
+| `site/app/page.sh`     | `send_error`, `send_file`                                                       |
 
 `send_file` answers a 304 through `send_response`, but streams the body itself: `_send_header` then
 `cat` for a 200, or `tail -c | head -c` for a 206. `_send_header` writes the status line, the headers

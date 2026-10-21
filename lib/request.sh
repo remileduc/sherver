@@ -22,8 +22,11 @@ declare -g REQUEST_FULL_STRING=''
 
 # Public: Initialize the environment.
 #
-# This function should always be ran at the top of any scripts. Once this function has
-# run, all the following variables will be available:
+# The dispatcher runs it once the library is sourced, and a `.sh` endpoint, being sourced
+# into that same process by `run_script`, finds everything already set: it does not need
+# to call it. Calling it anyway is a no-op, as a second parse of the same request would
+# only trip over the read-only declarations below. Once this function has run, all the
+# following variables will be available:
 #
 # * `SHERVER_ROOT`
 # * `REQUEST_METHOD`
@@ -51,6 +54,10 @@ declare -g REQUEST_FULL_STRING=''
 # environment.
 function init_environment()
 {
+	# the guard comes before everything: the `-r` declarations below cannot run twice
+	if [ -n "${_SHERVER_PARSED:-}" ]; then
+		return 0
+	fi
 	# we set all the needed variables in the environment.
 	# this is needed because we can't export associative arrays...
 
@@ -202,6 +209,11 @@ function init_environment()
 	else
 		read_request false <<< "$REQUEST_FULL_STRING"
 	fi
+	# Internal: set once the request is parsed, what makes a second call a no-op
+	#
+	# Never exported: a non-`.sh` endpoint is still a new process that has to parse
+	# `REQUEST_FULL_STRING` itself, and inheriting this would make it skip that.
+	declare -g _SHERVER_PARSED=1
 }
 export -f init_environment
 

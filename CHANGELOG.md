@@ -27,6 +27,13 @@ here; there is no redirect and no migration shim, on purpose.
   sourced by `lib/SHERVER.sh`, so no exec bit decides whether it is served anymore
 - the routing is `site/routes.sh`, sourced by `dispatcher.sh` once `OPTIONS` is answered — edit
   it, not the dispatcher, to add a route
+- **a `.sh` endpoint is sourced, not executed**: it runs in a subshell of the dispatcher and
+  finds the request already parsed, so it no longer needs to call `init_environment` (doing so is
+  a no-op now). Its `exit` ends the endpoint only; a command failing under its `set -e` is the
+  500 it always was. `URL_BASE` and `URL_PARAMETERS` are those of the URL `run_script` was
+  handed, no longer re-read from the request: `GET /` reaches `index.sh` as `/index.sh` plus the
+  query string. Anything not named `*.sh` is still executed, with `REQUEST_FULL_STRING` in its
+  environment and the URL in `$1`
 
 
 1.1 — 2026-10-18

@@ -17,8 +17,6 @@
 
 set -efu
 
-init_environment
-
 # no 405 arm: this endpoint serves every method `SUPPORTED_METHODS` lets through, OPTIONS
 # being answered by the dispatcher. An endpoint that doesn't, like `page.sh`, needs one
 if [ "$REQUEST_METHOD" = 'POST' ]; then
