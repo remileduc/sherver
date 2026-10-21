@@ -119,7 +119,7 @@ function check_shellcheck()
 	local file
 	local -a entry_points=()
 	for file in "${SHELL_FILES[@]}"; do
-		[[ $file == lib/* ]] || entry_points+=("$file")
+		[[ $file == lib/* || $file == site/routes.sh ]] || entry_points+=("$file")
 	done
 	shellcheck --external-sources -- "${entry_points[@]}"
 }
@@ -273,8 +273,9 @@ function check_error_codes()
 	report "sent by send_error or _bail_request but absent from HTTP_RESPONSE:" "${unknown[@]}"
 }
 
-# Internal: Anything executable under `scripts/` is a reachable HTTP endpoint, so every
-# script there must be. The library is sourced, never run, so nothing under `lib/` may be.
+# Internal: Anything executable under `site/app/` is a reachable HTTP endpoint, so every
+# script there must be. The library and the routes are sourced, never run, so nothing
+# under `lib/` may be, nor `site/routes.sh`.
 function check_executable_bits()
 {
 	local file
@@ -284,10 +285,10 @@ function check_executable_bits()
 	done
 	for file in "${STANDALONE_SCRIPTS[@]}"; do
 		case "$file" in
-			lib/*)
-				[ ! -x "$file" ] || wrong+=("$file is executable, but the library is sourced, never run")
+			lib/*|site/routes.sh)
+				[ ! -x "$file" ] || wrong+=("$file is executable, but it is sourced, never run")
 				;;
-			scripts/*)
+			site/app/*)
 				[ -x "$file" ] || wrong+=("$file is not executable, so it answers 404")
 				;;
 		esac
@@ -300,7 +301,7 @@ function check_executable_bits()
 function check_generated_docs()
 {
 	if [ ! -x './tomdoc.sh' ]; then
-		echo 'tomdoc.sh is not in the repository root, see scripts/README.md'
+		echo 'tomdoc.sh is not in the repository root, see site/app/README.md'
 		return 77
 	fi
 	local generated

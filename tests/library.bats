@@ -32,10 +32,10 @@ youpi
 }
 
 @test "parse_url keeps a percent encoded question mark in the path" {
-	run --separate-stderr with_request $'GET /file/what%3F.txt?real=yes HTTP/1.1\nHost: localhost' \
+	run --separate-stderr with_request $'GET /static/what%3F.txt?real=yes HTTP/1.1\nHost: localhost' \
 		'printf "%s\n" "$URL_BASE" "${URL_PARAMETERS[real]}"'
 	[ "$status" -eq 0 ]
-	[ "$output" = '/file/what?.txt
+	[ "$output" = '/static/what?.txt
 yes' ]
 }
 
@@ -84,11 +84,11 @@ a b' ]
 
 @test "_check_encoding accepts a properly encoded string" {
 	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
-		'for s in "/file/my%20file.txt" "/plain" "100%25"; do
+		'for s in "/static/my%20file.txt" "/plain" "100%25"; do
 			_check_encoding "$s" && echo "ok $s" || echo "ko $s"
 		done'
 	[ "$status" -eq 0 ]
-	[ "$output" = 'ok /file/my%20file.txt
+	[ "$output" = 'ok /static/my%20file.txt
 ok /plain
 ok 100%25' ]
 }
@@ -96,13 +96,13 @@ ok 100%25' ]
 @test "_check_encoding rejects what _url_decode cannot decode" {
 	# a NUL truncates the string in bash, the rest is simply not decodable
 	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
-		'for s in "%00" "a%00b" "/file/100%" "%zz" "%2" "%g0"; do
+		'for s in "%00" "a%00b" "/static/100%" "%zz" "%2" "%g0"; do
 			_check_encoding "$s" && echo "ok $s" || echo "ko $s"
 		done'
 	[ "$status" -eq 0 ]
 	[ "$output" = 'ko %00
 ko a%00b
-ko /file/100%
+ko /static/100%
 ko %zz
 ko %2
 ko %g0' ]
@@ -214,14 +214,14 @@ ko %g0' ]
 
 @test "_get_mimetype matches the extension whatever its case" {
 	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' \
-		'_get_mimetype "/file/PHOTO.JPG"; _get_mimetype "/file/photo.jpg"'
+		'_get_mimetype "/static/PHOTO.JPG"; _get_mimetype "/static/photo.jpg"'
 	[ "$status" -eq 0 ]
 	[ "$output" = 'image/jpeg
 image/jpeg' ]
 }
 
 @test "_get_mimetype falls back to octet-stream and logs it" {
-	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' '_get_mimetype "/file/archive.xyz"'
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' '_get_mimetype "/static/archive.xyz"'
 	[ "$status" -eq 0 ]
 	[ "$output" = 'application/octet-stream' ]
 	[[ $stderr == *'unknown extension'* ]]
@@ -229,7 +229,7 @@ image/jpeg' ]
 
 @test "_get_mimetype ignores a dot that belongs to a parent directory" {
 	# '${path##*.}' alone would read 'd/README' as the extension here
-	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' '_get_mimetype "/file/conf.d/README"'
+	run --separate-stderr with_request $'GET / HTTP/1.1\nHost: localhost' '_get_mimetype "/static/conf.d/README"'
 	[ "$status" -eq 0 ]
 	[ "$output" = 'application/octet-stream' ]
 }

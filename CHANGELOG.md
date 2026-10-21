@@ -7,10 +7,26 @@ one, everything before it is only in `git log`.
 
 A version number says how stable the scripting API is — the library functions of
 [docs/functions.md](./docs/functions.md), the variables of
-[docs/global-variables.md](./docs/global-variables.md), and the layout of `file/` and
-`scripts/`. It says nothing about how safe Sherver is: it is still not hardened and still
+[docs/global-variables.md](./docs/global-variables.md), and the layout of `site/static/` and
+`site/app/`. It says nothing about how safe Sherver is: it is still not hardened and still
 must not be exposed on Internet, at 1.0 as at 0.1 (see
 [About security](./README.md#about-security)).
+
+
+2.0 — unreleased
+----------------
+
+The checkout is laid out again, and one URL moved with it. Every contract this breaks is listed
+here; there is no redirect and no migration shim, on purpose.
+
+- **`/file/` is now `/static/`**: static content lives in `site/static/` instead of `file/`, and
+  the URL prefix follows the folder name
+- endpoints live in `site/app/` instead of `scripts/` (templates in `site/app/templates/`); a
+  script reaches static content through `../static/`, no longer `../file/`
+- the engine moved out of the served tree: `scripts/SHERVER_UTILS.sh` became the `lib/` modules,
+  sourced by `lib/SHERVER.sh`, so no exec bit decides whether it is served anymore
+- the routing is `site/routes.sh`, sourced by `dispatcher.sh` once `OPTIONS` is answered — edit
+  it, not the dispatcher, to add a route
 
 
 1.1 — 2026-10-18

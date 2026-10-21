@@ -25,14 +25,14 @@ set -efu
 # an executable. But it must have the `x` flag so we can run it.
 #
 # It will simply run the script if possible. If not, send a 404. If the script is outside
-# of `scripts/`, send a 404. If the script fails, send a 500.
+# of `site/app/`, send a 404. If the script fails, send a 500.
 #
 # It is the script responsibility to send the response and everything...
 #
-# *Note* that the file is supposed to be in the subfolder `scripts/`. The file will be
+# *Note* that the file is supposed to be in the subfolder `site/app/`. The file will be
 # run inside this folder (we `cd` before running it).
 #
-# $1 - the path to the file to run (relative to subfolder `scripts/`)
+# $1 - the path to the file to run (relative to subfolder `site/app/`)
 #
 # Examples
 #
@@ -40,14 +40,14 @@ set -efu
 #
 # will do the following
 #
-#    cd scripts
+#    cd site/app
 #    './index.sh' '/index.sh?dummy=stuff'
 function run_script()
 {
-	cd 'scripts'
+	cd 'site/app'
 	local -r url="${1:-$REQUEST_URL}"
 	parse_url "$url"
-	_resolve_path 'scripts' "${URL_BASE:1}"
+	_resolve_path 'site/app' "${URL_BASE:1}"
 	local -r script="$_RESOLVED_PATH"
 	# existence is already guaranteed by `_resolve_path`
 	if [ ! -f "$script" ] || [ ! -x "$script" ]; then

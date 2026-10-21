@@ -32,16 +32,16 @@ set -efu
 # Sends a 404 if the path is absolute, doesn't exist, or lands outside the authorized
 # directory. We purposely don't use 403 to avoid leak of the File System
 #
-# $1 - authorized directory, relative to `SHERVER_ROOT` (`file` or `scripts`)
+# $1 - authorized directory, relative to `SHERVER_ROOT` (`site/static` or `site/app`)
 # $2 - path to resolve, relative to the current directory (an absolute path is refused)
 #
 # Examples
 #
-#    _resolve_path 'file' '../file/pages/page.html'
+#    _resolve_path 'site/static' '../static/pages/page.html'
 #
 # will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
 #
-#    _RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
+#    _RESOLVED_PATH='/home/sherver/sherver/site/static/pages/page.html'
 function _resolve_path()
 {
 	local authorized
@@ -83,7 +83,7 @@ export -f _resolve_path
 #
 # An unknown or missing extension gives `application/octet-stream`, so that the browser
 # downloads the file instead of guessing how to render it. Since we own everything under
-# `file/`, that case means the table is missing an entry: it is logged.
+# `site/static/`, that case means the table is missing an entry: it is logged.
 #
 # `text/*` types carry `; charset=utf-8`. The others don't: `application/json` and the
 # image types have no charset parameter.
@@ -92,7 +92,7 @@ export -f _resolve_path
 #
 # Examples
 #
-#    _get_mimetype '/home/sherver/sherver/file/beautiful.png'
+#    _get_mimetype '/home/sherver/sherver/site/static/beautiful.png'
 #
 # will print
 #
@@ -208,7 +208,7 @@ export -f _get_mimetype
 #
 # It will automatically create a valid HTTP response that will stream the content
 # of the file, with the correct mime type and all. If the file doesn't exist, or
-# if the file is outside of `file/`, send a 404 error.
+# if the file is outside of `site/static/`, send a 404 error.
 #
 # Every answer carries two cache validators: an `ETag` built from the size and mtime
 # of the file, and its `Last-Modified` date. A conditional request that matches one
@@ -236,7 +236,7 @@ export -f _get_mimetype
 #
 # Examples
 #
-#    parse_url '/file/beautiful.png?dummy=stuff'
+#    parse_url '/static/beautiful.png?dummy=stuff'
 #    send_file "${URL_BASE:1}"
 #
 # if the file exist, will send a response that starts with (assuming file size is 4 kio)
@@ -246,7 +246,7 @@ export -f _get_mimetype
 #    Content-Length: 4096
 function send_file()
 {
-	_resolve_path 'file' "$1"
+	_resolve_path 'site/static' "$1"
 	local -r file="$_RESOLVED_PATH"
 	# existence is already guaranteed by `_resolve_path`
 	if [ ! -f "$file" ] || [ ! -r "$file" ]; then

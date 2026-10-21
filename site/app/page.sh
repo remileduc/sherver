@@ -30,4 +30,4 @@ if [ -z "${URL_PARAMETERS[page]:-}" ]; then
 	send_error 404
 fi
 
-send_file "../file/pages/${URL_PARAMETERS[page]}"
+send_file "../static/pages/${URL_PARAMETERS[page]}"

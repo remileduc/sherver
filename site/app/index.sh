@@ -46,7 +46,7 @@ BODY_TEMPLATE=$(cat <<EOF
 		<h2>Link to awesome page</h2>
 		<ul>
 			<li><a href="/page.sh?page=page.html">awesome page via script</a></li>
-			<li><a href="/file/pages/page.html">awesome page via direct access to file</a></li>
+			<li><a href="/static/pages/page.html">awesome page via direct access to file</a></li>
 		</ul>
 	</section>
 
@@ -77,7 +77,7 @@ $(html_escape "$REQUEST_FULL_STRING")
 		<h2>Image example</h2>
 		<p>Below you can find an example image that is automatically streamed by <em>Sherver</em>. Click to see full size.</p>
 		<figure>
-			<a href="/file/venise.webp"><img src="/file/venise.webp" alt=""></a>
+			<a href="/static/venise.webp"><img src="/static/venise.webp" alt=""></a>
 			<figcaption>Venise, Italy. CC-BY</figcaption>
 		</figure>
 	</section>

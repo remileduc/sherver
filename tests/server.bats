@@ -191,9 +191,9 @@ function teardown_file()
 
 @test "a binary file survives the socket" {
 	run curl -s -o "$BATS_TEST_TMPDIR/venise.webp" \
-		"$SHERVER_URL/file/venise.webp"
+		"$SHERVER_URL/static/venise.webp"
 	[ "$status" -eq 0 ]
-	cmp "$BATS_TEST_TMPDIR/venise.webp" "$REPO_ROOT/file/venise.webp"
+	cmp "$BATS_TEST_TMPDIR/venise.webp" "$REPO_ROOT/site/static/venise.webp"
 }
 
 @test "concurrent clients are all served" {

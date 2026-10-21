@@ -77,7 +77,7 @@ CapabilityBoundingSet=
 
 # Give back only what a script really needs. `ReadWritePaths` punches a hole in the read-only
 # file system, and the whole address family list has to be repeated, not just the addition
-#ReadWritePaths=/home/sherver/sherver/file/uploads
+#ReadWritePaths=/home/sherver/sherver/site/static/uploads
 #RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
 
 [Install]

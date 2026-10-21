@@ -75,8 +75,8 @@ Returns 0 if the string can safely be given to `_url_decode()`, 1 otherwise. A `
 
 Examples
 
-     _check_encoding '/file/my%20file.txt'  # returns 0
-     _check_encoding '/file/100%'           # returns 1
+     _check_encoding '/static/my%20file.txt'  # returns 0
+     _check_encoding '/static/100%'           # returns 1
 
 
 `_url_decode()`
@@ -474,16 +474,16 @@ The result is stored in `_RESOLVED_PATH` instead of being echoed, because this f
 
 Sends a 404 if the path is absolute, doesn't exist, or lands outside the authorized directory. We purposely don't use 403 to avoid leak of the File System
 
-* $1 - authorized directory, relative to `SHERVER_ROOT` (`file` or `scripts`)
+* $1 - authorized directory, relative to `SHERVER_ROOT` (`site/static` or `site/app`)
 * $2 - path to resolve, relative to the current directory (an absolute path is refused)
 
 Examples
 
-     _resolve_path 'file' '../file/pages/page.html'
+     _resolve_path 'site/static' '../static/pages/page.html'
 
 will result in (assuming `SHERVER_ROOT` is `/home/sherver/sherver`)
 
-     _RESOLVED_PATH='/home/sherver/sherver/file/pages/page.html'
+     _RESOLVED_PATH='/home/sherver/sherver/site/static/pages/page.html'
 
 
 `_get_mimetype()`
@@ -495,7 +495,7 @@ Internal: Print the mime type of the given file, deduced from its extension.
 
 The type comes from a static table, the way nginx and Apache do it: for a static file server the extension is the authoritative signal.
 
-An unknown or missing extension gives `application/octet-stream`, so that the browser downloads the file instead of guessing how to render it. Since we own everything under `file/`, that case means the table is missing an entry: it is logged.
+An unknown or missing extension gives `application/octet-stream`, so that the browser downloads the file instead of guessing how to render it. Since we own everything under `site/static/`, that case means the table is missing an entry: it is logged.
 
 `text/*` types carry `; charset=utf-8`. The others don't: `application/json` and the image types have no charset parameter.
 
@@ -503,7 +503,7 @@ An unknown or missing extension gives `application/octet-stream`, so that the br
 
 Examples
 
-     _get_mimetype '/home/sherver/sherver/file/beautiful.png'
+     _get_mimetype '/home/sherver/sherver/site/static/beautiful.png'
 
 will print
 
@@ -517,7 +517,7 @@ Public: Try to send the given file, or fail with 404.
 
 Takes the path to the file to send as a parameter.
 
-It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, or if the file is outside of `file/`, send a 404 error.
+It will automatically create a valid HTTP response that will stream the content of the file, with the correct mime type and all. If the file doesn't exist, or if the file is outside of `site/static/`, send a 404 error.
 
 Every answer carries two cache validators: an `ETag` built from the size and mtime of the file, and its `Last-Modified` date. A conditional request that matches one of them (`If-None-Match` first, `If-Modified-Since` only when no usable ETag was sent) is answered with a bodyless `304 Not Modified`. An `If-None-Match` of `*` matches too.
 
@@ -533,7 +533,7 @@ The path generally comes from the URL (`URL_BASE`). You just need to remove the 
 
 Examples
 
-     parse_url '/file/beautiful.png?dummy=stuff'
+     parse_url '/static/beautiful.png?dummy=stuff'
      send_file "${URL_BASE:1}"
 
 if the file exist, will send a response that starts with (assuming file size is 4 kio)
@@ -552,13 +552,13 @@ Public: Try to run the given file (script or executable), or fail with 404.
 
 Takes the path to the file to run. The file can be a script in any language, or an executable. But it must have the `x` flag so we can run it.
 
-It will simply run the script if possible. If not, send a 404. If the script is outside of `scripts/`, send a 404. If the script fails, send a 500.
+It will simply run the script if possible. If not, send a 404. If the script is outside of `site/app/`, send a 404. If the script fails, send a 500.
 
 It is the script responsibility to send the response and everything...
 
-*Note* that the file is supposed to be in the subfolder `scripts/`. The file will be run inside this folder (we `cd` before running it).
+*Note* that the file is supposed to be in the subfolder `site/app/`. The file will be run inside this folder (we `cd` before running it).
 
-* $1 - the path to the file to run (relative to subfolder `scripts/`)
+* $1 - the path to the file to run (relative to subfolder `site/app/`)
 
 Examples
 
@@ -566,7 +566,7 @@ Examples
 
 will do the following
 
-     cd scripts
+     cd site/app
      './index.sh' '/index.sh?dummy=stuff'
 
 

@@ -57,10 +57,10 @@ function init_environment()
 	# Public: Absolute path to the root of the website (canonical, no symlink)
 	#
 	# The dispatcher runs from the root, so we take the current directory. It is then
-	# inherited by the child scripts, which need it because `run_script` moves to `scripts/`.
+	# inherited by the child scripts, which need it because `run_script` moves to `site/app/`.
 	#
 	# Assigned apart from `declare`, whose zero return would hide a `realpath` failure from
-	# `set -e` — the confinement check would then compare against `/file` and `/scripts`.
+	# `set -e` — the confinement check would then compare against `/site/static` and `/site/app`.
 	if [ -z "${SHERVER_ROOT:-}" ]; then
 		declare -g SHERVER_ROOT
 		SHERVER_ROOT=$(realpath .) || { log "FATAL: cannot canonicalize '$PWD'"; exit 1; }
@@ -217,8 +217,8 @@ export -f init_environment
 #
 # Examples
 #
-#    _check_encoding '/file/my%20file.txt'  # returns 0
-#    _check_encoding '/file/100%'           # returns 1
+#    _check_encoding '/static/my%20file.txt'  # returns 0
+#    _check_encoding '/static/100%'           # returns 1
 function _check_encoding()
 {
 	if [[ $1 == *%00* ]]; then

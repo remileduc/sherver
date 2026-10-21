@@ -20,7 +20,7 @@ What it protects, what it doesn't
   the middle with their own certificate and you won't notice. Import the certificate on your
   devices (see below) and the warning disappears along with that window.
 - **It does not make Sherver safe to expose.** The parser is still naive and anything executable
-  under `scripts/` is still an endpoint. **Do not expose Sherver on Internet**, HTTPS or not (see
+  under `site/app/` is still an endpoint. **Do not expose Sherver on Internet**, HTTPS or not (see
   [About security](../README.md#about-security)).
 
 Requirements
@@ -63,8 +63,8 @@ Why these options:
 
 Two placement rules:
 
-- the `certs/` folder lives at the repository root, **not** under `file/` or `scripts/` — those two
-  are the served directories, everything else is unreachable through HTTP by construction.
+- the `certs/` folder lives at the repository root, **not** under `site/` — that tree
+  is the served one, everything else is unreachable through HTTP by construction.
 - it is in `.gitignore`; the private key never gets committed.
 
 Enable it

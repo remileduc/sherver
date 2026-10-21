@@ -88,12 +88,12 @@ packages.
 ### Features ###
 
 Sherver is a web server that implements part of HTTP 1.1. Even if it is written in a few lines of Bash, it is able to do a lot:
-- no configuration needed: you can just add files either in `scripts` or in `file` folders
+- no configuration needed: you can just add files either in `site/app` or in `site/static` folders
 - serve any HTML page no matter how complexe (with advanced JavaScript and multiple scripts or files to download...)
 - serve files (text or binary, pictures...) with correct mime type
 - dynamic pages
 - templated HTML so you don't have to duplicate headers and footers
-- parse of URL query string, percent decoded (so `/file/my%20file.txt` finds `my file.txt`), in
+- parse of URL query string, percent decoded (so `/static/my%20file.txt` finds `my file.txt`), in
   origin form as in absolute form (`GET http://host/path HTTP/1.1`)
 - support for GET, HEAD, POST and OPTIONS
 - deal with client cache resources
@@ -137,14 +137,14 @@ Quick documentation about how to use Sherver for your own use. All variables men
 in [docs/global-variables.md](./docs/global-variables.md), the functions in [docs/functions.md](./docs/functions.md),
 and a map of who calls what is in [docs/call-graph.md](./docs/call-graph.md).
 
-Note that the 2 important folders `file` and `scripts` can be symlink, but files inside can't.
+Note that the 2 important folders `site/static` and `site/app` can be symlink, but files inside can't.
 
 ### Serve static pages ###
 
 The simplest thing you can do is to serve static pages : pure HTML files that don't need any processing.
 
-To do so, you only need to put your HTML files in the subdirectory [file/pages](./file/pages). Then, you can access
-to your pages through a URL like `/file/pages/index.html` (if your
+To do so, you only need to put your HTML files in the subdirectory [site/static/pages](./site/static/pages). Then, you can access
+to your pages through a URL like `/static/pages/index.html` (if your
 file name is `index.html` for instance).
 
 Note that you'll have to give the full file name in the URL so Sherver can find it.
@@ -155,33 +155,33 @@ It is as simple as that! If Sherver can find the file, it will serve it. Otherwi
 
 You can serve any type of files from Sherver. From text-based like CSS or JavaScript to binaries like images, videos, zip...
 
-Just put the files in the subdirectory [file](./file). You can then reference them through a URL like
-`/file/venise.webp`. Note that it is preferable to give full path rather than relative paths.
+Just put the files in the subdirectory [site/static](./site/static). You can then reference them through a URL like
+`/static/venise.webp`. Note that it is preferable to give full path rather than relative paths.
 
 Sherver will automatically serve the file if it can find it, with the correct mime type. It will even allow the browser to
 cache the file, and will only serve it again if the file has changed. If Sherver can't find the file, it will return a
 404 error.
 
-For resources, like CSS, JavaScript, favicon... it is better to put them in the subfolder [file/resources](./file/resources),
+For resources, like CSS, JavaScript, favicon... it is better to put them in the subfolder [site/static/resources](./site/static/resources),
 though you don't have to.
 
 **Example on how to link a CSS file:**
 
 ```html
-<link rel="stylesheet" type="text/css" href="/file/resources/ugly.css">
+<link rel="stylesheet" type="text/css" href="/static/resources/ugly.css">
 ```
 
 **Example on how to integrate a picture in your HTML:**
 
 ```html
-<img src="/file/venise.webp" alt="">
+<img src="/static/venise.webp" alt="">
 ```
 
 ### Serve dynamic pages ###
 
 This is where Sherver becomes useful: it can serve dynamic pages, built server side depending on the context.
 
-To do so, you just need to add executables in the subfolder [scripts](./scripts). Executables can be of any types
+To do so, you just need to add executables in the subfolder [site/app](./site/app). Executables can be of any types
 (bash script, python script, any other scripts, any binary like C++ compiled executable...) as soon as Sherver can
 execute it (it must have the `executable` flag set).
 
@@ -190,10 +190,11 @@ particular name as it is the one that will be executed by the dispatcher if you 
 (see [dispatcher](#dispatcher) section below). If Sherver can't run any files, it will return a 404 error. If
 the executable fails (return code is not `0`), it will return a 500 error.
 
-To link an executable, you have to omit the folder`scripts` in the URL: `/page.sh` will look for the executable
-`./scripts/page.sh`.
+To link an executable, you have to omit the folder `site/app` in the URL: `/page.sh` will look for the executable
+`./site/app/page.sh`.
 
-The executable is ran from the `scripts` folder.
+The executable is ran from the `site/app` folder, so relative paths inside a script are taken from there
+(`../static/pages/page.html` reaches a static page, as `page.sh` does).
 
 **Bash scripts**
 
@@ -255,7 +256,7 @@ of `REQUEST_FULL_STRING`, and a `HEAD` answer must carry the headers only, no bo
 For Bash scripts, there is a basic template engine integrated with Sherver (lol). It actually uses
 `envsubst` to replace any occurrence of `$VARIABLE` by the variable from the environment if there is.
 
-You can put your templates in the subfolder [scripts/templates](./scripts/templates), though it is not
+You can put your templates in the subfolder [site/app/templates](./site/app/templates), though it is not
 mandatory.
 
 Here is a template for a text file `template.txt` (that improves our previous Bash script example):
@@ -335,7 +336,7 @@ To keep the logs in a file, you can redirect the error output of *sherver.sh* in
 By default, a served request is one line, and an error adds the reason it failed:
 
 ```
-::ffff:192.0.2.7 GET /file/venise.webp 200
+::ffff:192.0.2.7 GET /static/venise.webp 200
 NOT FOUND: realpath - 'nope.sh'
 ::ffff:192.0.2.7 GET /nope.sh 404
 ```
@@ -365,18 +366,21 @@ journalctl -u sherver.service -f
 
 ### Dispatcher ###
 
-The dispatcher is responsible of asking to either serve a file or run a script, depending on the requested UTL.
-It is implemented in the file [dispatcher.sh](./dispatcher.sh).
+The dispatcher is responsible of asking to either serve a file or run a script, depending on the requested URL.
+It is implemented in the file [dispatcher.sh](./dispatcher.sh), which parses the request and then sources the
+routing table, [site/routes.sh](./site/routes.sh).
 
-It currently has 4 actions:
+The routes currently have 4 actions:
 
-- if the URL is the root (`/`), then it executes the script `scripts/index.sh`
-- if the URL asks for `index.htm` or `index.html`, it executes the script `scripts/index.sh`
-- if the URL starts with `/file/`, it serves the file asked
-- in any other case, it will run the script provided by the URL, prepending the *scripts* folder
-  (the URL `/test/dummy.sh` will run the script `scripts/test/dummy.sh` if it exists).
+- if the URL is the root (`/`), then it executes the script `site/app/index.sh`
+- if the URL asks for `index.htm` or `index.html`, it executes the script `site/app/index.sh`
+- if the URL starts with `/static/`, it serves the file asked
+- in any other case, it will run the script provided by the URL, prepending the *site/app* folder
+  (the URL `/test/dummy.sh` will run the script `site/app/test/dummy.sh` if it exists).
 
-All this behaviors can be changed by editing the file [dispatcher.sh](./dispatcher.sh).
+All this behaviors can be changed by editing the file [site/routes.sh](./site/routes.sh). Every route ends in
+a terminal `send_*` or `run_script`, so a new one has to come before the catch-all, and `dispatcher.sh` itself
+does not need to change.
 
 ### HTTPS ###
 
@@ -463,7 +467,7 @@ See [bashttpd](https://github.com/avleen/bashttpd#security). It is obvious to sa
 features. **Do not expose Sherver on Internet**.
 
 - it uses rudimentary bash scripts to parse URL and POST request body, that could lead to security breaches
-- it executes blindly any script in the *scripts* subfolder
+- it executes blindly any script in the *site/app* subfolder
 - [HTTPS](./docs/https.md) only encrypts the transport, it fixes none of the above
 
 If you need to expose the site on internet, you need a real server that has been built especially to face all these
